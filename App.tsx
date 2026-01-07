@@ -64,9 +64,10 @@ const App: React.FC = () => {
         setGameState(prev => {
           if (prev.timer <= 0) return proceedToNextPhase(prev);
           
-          // 버프 및 효과 시간 만료 처리 (필터링)
           const now = Date.now();
           const newState = JSON.parse(JSON.stringify(prev)) as GameState;
+          
+          // 버프 만료 필터링
           Object.values(newState.teams).forEach(t => {
             t.activeEffects = t.activeEffects.filter(e => e.until > now);
           });
@@ -148,8 +149,8 @@ const App: React.FC = () => {
           const t = newState.teams[payload.teamId];
           if (t && !t.isDead && newState.phase === 'BATTLE') {
             const speedMult = t.activeEffects.some(e => e.type === 'w_speed') ? 2 : 1;
-            t.x = Math.max(0, Math.min(1000, t.x + payload.dir.x * t.stats.speed * 3 * speedMult));
-            t.y = Math.max(0, Math.min(1000, t.y + payload.dir.y * t.stats.speed * 3 * speedMult));
+            t.x = Math.max(0, Math.min(1000, t.x + payload.dir.x * t.stats.speed * 3.5 * speedMult));
+            t.y = Math.max(0, Math.min(1000, t.y + payload.dir.y * t.stats.speed * 3.5 * speedMult));
             if (payload.dir.x !== 0 || payload.dir.y !== 0) t.angle = Math.atan2(payload.dir.y, payload.dir.x) * (180 / Math.PI);
           }
           break;
@@ -159,7 +160,7 @@ const App: React.FC = () => {
           if (t && !t.isDead && newState.phase === 'BATTLE') {
             t.lastAtkTime = now;
             playSound('attack');
-            const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 3 : 1;
+            const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 2.5 : 1;
             const atkMult = t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1;
             const attackerAngleRad = t.angle * (Math.PI / 180);
             
@@ -171,13 +172,10 @@ const App: React.FC = () => {
               const angleDiff = Math.abs(angleToTarget - attackerAngleRad);
               const normalizedDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
 
-              // 클래스별 방향성 판정
               let isHit = false;
               if (t.classType === ClassType.WARRIOR || t.classType === ClassType.ROGUE) {
-                // 부채꼴 90도 판정
-                if (dist < t.stats.range * rangeMult && Math.abs(normalizedDiff) < Math.PI / 4) isHit = true;
+                if (dist < t.stats.range * rangeMult && Math.abs(normalizedDiff) < Math.PI / 3) isHit = true;
               } else {
-                // 직선형 좁은 판정
                 if (dist < t.stats.range * rangeMult && Math.abs(normalizedDiff) < 0.2) isHit = true;
               }
 
@@ -200,15 +198,15 @@ const App: React.FC = () => {
           playSound('click');
           if (payload.action === 'ITEM') {
             (t.items as any)[payload.item] = true;
-            if (payload.item === 'weapon') t.stats.atk += 10;
+            if (payload.item === 'weapon') t.stats.atk += 12;
             if (payload.item === 'armor') t.stats.def += 10;
-            if (payload.item === 'boots') t.stats.speed += 1.2;
+            if (payload.item === 'boots') t.stats.speed += 1.5;
           } else if (payload.action === 'STAT') {
-            if (payload.stat === 'hp') t.hp = Math.min(t.maxHp, t.hp + 40);
-            if (payload.stat === 'mp') t.mp = Math.min(t.maxMp, t.mp + 40);
-            if (payload.stat === 'revive') { t.isDead = false; t.hp = 50; }
-            if (payload.stat === 'atk') t.stats.atk += 5;
-            if (payload.stat === 'def') t.stats.def += 5;
+            if (payload.stat === 'hp') t.hp = Math.min(t.maxHp, t.hp + 50);
+            if (payload.stat === 'mp') t.mp = Math.min(t.maxMp, t.mp + 50);
+            if (payload.stat === 'revive') { t.isDead = false; t.hp = 70; }
+            if (payload.stat === 'atk') t.stats.atk += 6;
+            if (payload.stat === 'def') t.stats.def += 6;
           } else if (payload.action === 'SKILL') {
             if (!t.unlockedSkills.includes(payload.skillId)) t.unlockedSkills.push(payload.skillId);
           }
@@ -228,12 +226,11 @@ const App: React.FC = () => {
             t.activeEffects.push({ type: skill.id, until: now + 2000 });
           } else {
             t.activeEffects.push({ type: skill.id, until: now + 500 });
-            // 즉시 발동 공격 스킬 로직 (광역/레이저 등)
             if (skill.id === 'm_thunder') {
               Object.values(newState.teams).forEach((target: any) => {
                 if (target.id === t.id || target.isDead) return;
                 const dist = Math.sqrt((target.x - t.x)**2 + (target.y - t.y)**2);
-                if (dist < 400) { target.hp = Math.max(0, target.hp - (t.stats.atk * 2.5)); if(target.hp===0) target.isDead=true; }
+                if (dist < 400) { target.hp = Math.max(0, target.hp - (t.stats.atk * 3)); if(target.hp===0) target.isDead=true; }
               });
             }
           }
@@ -243,7 +240,7 @@ const App: React.FC = () => {
           const p = newState.players[payload.playerId];
           if (p && !p.hasSubmittedQuiz) {
             p.hasSubmittedQuiz = true;
-            if (payload.correct) { newState.teams[payload.teamId].points += 10; playSound('quiz_ok'); }
+            if (payload.correct) { newState.teams[payload.teamId].points += 15; playSound('quiz_ok'); }
             else { newState.teams[payload.teamId].points += 5; playSound('quiz_no'); }
           }
           break;
@@ -256,9 +253,39 @@ const App: React.FC = () => {
     });
   };
 
+  const downloadCSVTemplate = () => {
+    const content = "question,option1,option2,option3,option4,answer(1-4)\n사과는 영어로?,Apple,Banana,Cherry,Date,1";
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'quiz_template.csv');
+    link.click();
+  };
+
+  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      const lines = text.split('\n').slice(1);
+      const loaded = lines.filter(l => l.trim()).map(line => {
+        const p = line.split(',');
+        return p.length >= 6 ? { 
+          question: p[0].trim(), 
+          options: [p[1], p[2], p[3], p[4]].map(o => o.trim()), 
+          answer: parseInt(p[5].trim()) - 1 
+        } : null;
+      }).filter((q): q is Quiz => q !== null);
+      setQuizList([...quizList, ...loaded]);
+    };
+    reader.readAsText(file);
+  };
+
   const createRoom = () => {
     const finalCode = (customCode || roomCode).toUpperCase();
-    if (!finalCode) return alert("코드를 입력하세요.");
+    if (!finalCode) return alert("전장의 이름을 정해주세요.");
     setIsConnecting(true);
     network.init(finalCode, true, setGameState, () => {
       setIsHost(true); setIsConnecting(false); setRoomCode(finalCode);
@@ -269,13 +296,18 @@ const App: React.FC = () => {
 
   if (view === 'landing') {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-[#020617] text-white">
-        <h1 className="text-8xl font-black italic text-blue-500 mb-4 animate-pulse">EDU ARENA</h1>
-        <div className="w-full max-w-md p-10 bg-slate-900 rounded-[3rem] border-2 border-blue-500/30 space-y-6 shadow-2xl">
-          <input className="w-full p-5 bg-slate-800 rounded-2xl font-bold" placeholder="영웅 닉네임" value={userName} onChange={e => setUserName(e.target.value)} />
-          <input className="w-full p-5 bg-slate-800 rounded-2xl font-black uppercase" placeholder="방 코드" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
-          <button onClick={() => { if(!userName) return alert("닉네임 필요"); setIsConnecting(true); network.init(roomCode.toUpperCase(), false, setGameState, () => { setIsConnecting(false); setView('lobby'); }); }} className="w-full py-5 bg-blue-600 rounded-2xl font-black text-2xl">입장하기</button>
-          <button onClick={() => setView('host_setup')} className="w-full py-2 text-slate-500 font-bold hover:text-white transition-colors text-sm">교사용 전장 설계 (Host)</button>
+      <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-[#0a0a0a] text-amber-100 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
+        <div className="text-center mb-12">
+          <h1 className="text-9xl font-black italic text-transparent bg-clip-text bg-gradient-to-b from-amber-200 to-amber-700 drop-shadow-[0_10px_10px_rgba(0,0,0,1)] animate-pulse mb-2">EDU ARENA</h1>
+          <p className="text-amber-600 font-bold tracking-[0.8em] uppercase text-sm">Legendary Chronicles</p>
+        </div>
+        <div className="w-full max-w-md p-10 bg-slate-900 border-double border-8 border-amber-900 shadow-2xl space-y-8">
+          <div className="space-y-4">
+            <input className="w-full p-4 bg-black border border-amber-900 rounded-none font-bold text-amber-200" placeholder="용사의 이름" value={userName} onChange={e => setUserName(e.target.value)} />
+            <input className="w-full p-4 bg-black border border-amber-900 rounded-none font-black uppercase text-amber-200" placeholder="전장 코드" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
+            <button onClick={() => { if(!userName) return alert("이름을 입력하십시오."); setIsConnecting(true); network.init(roomCode.toUpperCase(), false, setGameState, () => { setIsConnecting(false); setView('lobby'); }); }} className="w-full py-5 bg-amber-800 hover:bg-amber-700 border-2 border-amber-600 font-black text-2xl text-white transition-all shadow-[inset_0_0_20px_rgba(0,0,0,0.5)]">모험 시작</button>
+          </div>
+          <button onClick={() => setView('host_setup')} className="w-full py-2 text-amber-900 font-bold hover:text-amber-500 transition-colors text-xs tracking-widest">전장 설계자(Host) 모드</button>
         </div>
       </div>
     );
@@ -283,25 +315,43 @@ const App: React.FC = () => {
 
   if (view === 'host_setup') {
     return (
-      <div className="flex flex-col h-screen bg-[#020617] text-white p-10">
-        <h2 className="text-4xl font-black text-blue-400 mb-10">전장 설계자 메뉴</h2>
-        <div className="grid grid-cols-2 gap-10">
-          <div className="bg-slate-900 p-8 rounded-3xl space-y-4">
-            <h3 className="text-xl font-bold">1. 퀴즈 입력</h3>
-            <input className="w-full p-4 bg-black rounded-xl" placeholder="질문" value={newQuiz.question} onChange={e => setNewQuiz({...newQuiz, question: e.target.value})} />
-            <div className="grid grid-cols-2 gap-2">
-              {newQuiz.options.map((o, i) => <input key={i} className="p-3 bg-black rounded-lg text-xs" placeholder={`보기 ${i+1}`} value={o} onChange={e => { const opts = [...newQuiz.options]; opts[i] = e.target.value; setNewQuiz({...newQuiz, options: opts}); }} />)}
+      <div className="flex flex-col h-screen bg-[#0a0a0a] text-amber-100 p-8">
+        <h2 className="text-5xl font-black text-amber-600 mb-8 italic tracking-tighter">전장 설계자 서재</h2>
+        <div className="grid grid-cols-2 gap-8 flex-1 overflow-hidden">
+          <div className="bg-slate-900 p-8 border-4 border-amber-900 flex flex-col gap-6">
+            <h3 className="text-2xl font-bold border-b border-amber-900 pb-2">신규 퀴즈 기록</h3>
+            <input className="w-full p-4 bg-black border border-amber-900 text-amber-200" placeholder="질문 내용을 입력하세요" value={newQuiz.question} onChange={e => setNewQuiz({...newQuiz, question: e.target.value})} />
+            <div className="grid grid-cols-1 gap-3">
+              {newQuiz.options.map((o, i) => (
+                <div key={i} className="flex gap-2 items-center">
+                  <input type="radio" checked={newQuiz.answer === i} onChange={() => setNewQuiz({...newQuiz, answer: i})} className="w-5 h-5 accent-amber-600" />
+                  <input className="flex-1 p-3 bg-black border border-amber-900 text-xs text-amber-200" placeholder={`보기 ${i+1}`} value={o} onChange={e => { const opts = [...newQuiz.options]; opts[i] = e.target.value; setNewQuiz({...newQuiz, options: opts}); }} />
+                </div>
+              ))}
             </div>
-            <button onClick={() => { if(newQuiz.question) { setQuizList([...quizList, newQuiz]); setNewQuiz({question:'', options:['','','',''], answer:0}); } }} className="w-full py-3 bg-blue-600 rounded-xl font-bold">퀴즈 추가</button>
+            <button onClick={() => { if(newQuiz.question) { setQuizList([...quizList, newQuiz]); setNewQuiz({question:'', options:['','','',''], answer:0}); } }} className="w-full py-4 bg-amber-800 font-bold border-2 border-amber-600 text-white">서적에 기록</button>
+            <div className="flex gap-2 pt-4">
+              <button onClick={downloadCSVTemplate} className="flex-1 py-2 bg-slate-800 text-[10px] font-bold border border-amber-900">양식 다운로드</button>
+              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-2 bg-slate-800 text-[10px] font-bold border border-amber-900">CSV 업로드</button>
+              <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleCSVUpload} />
+            </div>
           </div>
-          <div className="bg-slate-950 p-8 rounded-3xl overflow-y-auto custom-scrollbar h-[400px]">
-            <h3 className="text-xl font-bold mb-4">등록된 퀴즈 ({quizList.length})</h3>
-            {quizList.map((q, i) => <div key={i} className="p-4 bg-white/5 rounded-xl mb-2 flex justify-between"><span>{i+1}. {q.question}</span><button onClick={() => setQuizList(quizList.filter((_, idx) => idx !== i))} className="text-red-500">삭제</button></div>)}
+          <div className="bg-slate-950 p-8 border-4 border-amber-900 overflow-y-auto custom-scrollbar">
+            <h3 className="text-2xl font-bold mb-4 border-b border-amber-900 pb-2">기록된 퀴즈 목록 ({quizList.length})</h3>
+            {quizList.map((q, i) => (
+              <div key={i} className="p-4 bg-black border border-amber-950 mb-3 flex justify-between items-center group">
+                <div className="text-sm">
+                  <span className="text-amber-700 mr-2 font-mono">#{i+1}</span>
+                  <span className="font-bold">{q.question}</span>
+                </div>
+                <button onClick={() => setQuizList(quizList.filter((_, idx) => idx !== i))} className="text-red-900 hover:text-red-500 font-bold">말살</button>
+              </div>
+            ))}
           </div>
         </div>
-        <div className="mt-auto flex gap-4">
-          <input className="flex-1 p-5 bg-slate-900 rounded-2xl text-2xl font-black uppercase text-center" placeholder="방 코드 설정" value={customCode} onChange={e => setCustomCode(e.target.value)} />
-          <button onClick={createRoom} className="px-20 bg-blue-600 rounded-2xl font-black text-2xl">전장 생성</button>
+        <div className="mt-8 flex gap-4">
+          <input className="flex-1 p-5 bg-slate-900 border-4 border-amber-900 rounded-none text-3xl font-black uppercase text-center text-amber-200" placeholder="전장 이름 설정" value={customCode} onChange={e => setCustomCode(e.target.value)} />
+          <button onClick={createRoom} className="px-16 bg-amber-800 border-4 border-amber-600 font-black text-2xl text-white shadow-lg">차원문 생성</button>
         </div>
       </div>
     );
@@ -309,25 +359,26 @@ const App: React.FC = () => {
 
   if (view === 'host_lobby') {
     return (
-      <div className="h-screen bg-[#020617] text-white flex flex-col p-10">
-        <div className="flex justify-between items-center mb-10 bg-slate-900 p-8 rounded-3xl border border-white/10">
-          <div><p className="text-blue-500 text-xs font-black uppercase mb-1">Room Code</p><h2 className="text-8xl font-mono font-black">{gameState.roomCode}</h2></div>
-          <button onClick={() => { playSound('phase'); const ns = { ...gameState, isStarted: true }; setGameState(ns); network.broadcastState(ns); setView('game'); }} className="px-16 py-8 bg-emerald-600 rounded-3xl font-black text-4xl hover:scale-105 transition-all">전투 개시</button>
+      <div className="h-screen bg-[#0a0a0a] text-amber-100 flex flex-col p-10">
+        <div className="flex justify-between items-center mb-10 bg-slate-900 p-10 border-double border-8 border-amber-900 shadow-2xl">
+          <div>
+            <p className="text-amber-700 text-sm font-black uppercase mb-1 tracking-widest">Ancient Portal Key</p>
+            <h2 className="text-9xl font-mono font-black text-amber-200">{gameState.roomCode}</h2>
+          </div>
+          <button onClick={() => { playSound('phase'); const ns = { ...gameState, isStarted: true }; setGameState(ns); network.broadcastState(ns); setView('game'); }} className="px-20 py-10 bg-amber-800 border-4 border-amber-600 font-black text-5xl text-white hover:bg-amber-700 hover:scale-105 transition-all shadow-[0_0_50px_rgba(180,83,9,0.5)]">원정대 출발</button>
         </div>
         <div className="grid grid-cols-3 gap-8 overflow-y-auto flex-1 custom-scrollbar">
           {[1,2,3,4,5,6,7,8,9].map(tId => {
-            /* Fix: Cast p to Player to access teamId property */
             const teamPlayers = Object.values(gameState.players).filter(p => (p as Player).teamId === tId.toString());
             return (
-              <div key={tId} className={`p-6 rounded-3xl border transition-all ${teamPlayers.length > 0 ? 'bg-slate-900 border-blue-500' : 'bg-slate-950 border-white/5 opacity-40'}`}>
-                <h3 className="text-2xl font-black italic mb-4">{tId} 모둠</h3>
+              <div key={tId} className={`p-6 border-4 transition-all ${teamPlayers.length > 0 ? 'bg-slate-900 border-amber-600' : 'bg-black border-amber-900/20 opacity-40'}`}>
+                <h3 className="text-2xl font-black italic mb-4 border-b border-amber-900/50 pb-2">{tId}번 성채</h3>
                 {teamPlayers.map(p_raw => {
-                  /* Fix: Cast individual player to Player interface */
                   const p = p_raw as Player;
                   return (
-                    <div key={p.id} className="flex justify-between bg-black/40 p-3 rounded-xl mb-2 text-sm">
-                      <span className="font-bold">{p.name}</span>
-                      <span className={`px-2 rounded text-[10px] font-black ${p.role === Role.COMBAT ? 'bg-red-600' : p.role === Role.QUIZ ? 'bg-blue-600' : 'bg-emerald-600'}`}>{p.role}</span>
+                    <div key={p.id} className="flex justify-between bg-black/60 p-3 mb-2 border-l-4 border-amber-700">
+                      <span className="font-bold text-amber-200">{p.name}</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-black text-white ${p.role === Role.COMBAT ? 'bg-red-900' : p.role === Role.QUIZ ? 'bg-blue-900' : 'bg-emerald-900'}`}>{p.role}</span>
                     </div>
                   );
                 })}
@@ -342,37 +393,41 @@ const App: React.FC = () => {
   if (view === 'lobby') {
     const players = Object.values(gameState.players);
     return (
-      <div className="h-screen bg-[#020617] text-white p-8 flex flex-col items-center">
-        <h2 className="text-5xl font-black italic mb-10">모둠 및 역할 선택</h2>
+      <div className="h-screen bg-[#0a0a0a] text-amber-100 p-8 flex flex-col items-center">
+        <h2 className="text-6xl font-black italic mb-12 text-amber-600 drop-shadow-md">모둠과 가문의 문장 선택</h2>
         {myPlayer ? (
-          <div className="bg-slate-900 p-12 rounded-[3rem] border-4 border-blue-500 text-center animate-in fade-in zoom-in">
-            <p className="text-3xl font-black mb-4">참가 확정!</p>
-            <p className="text-blue-400 font-bold mb-8">선생님의 신호를 기다리고 있습니다...</p>
-            <div className="text-left bg-black/30 p-6 rounded-2xl mb-8 font-bold">
-              <p>모둠: {myPlayer.teamId}팀</p>
-              <p>역할: {myPlayer.role}</p>
-              {myPlayer.role === Role.COMBAT && <p>직업: {myPlayer.classType}</p>}
+          <div className="bg-slate-900 p-16 border-double border-8 border-amber-900 text-center animate-in zoom-in">
+            <p className="text-5xl font-black mb-6 text-amber-200 italic">서약 완료!</p>
+            <p className="text-amber-700 font-bold mb-10 tracking-widest animate-pulse uppercase">디아스포라의 부름을 기다리는 중...</p>
+            <div className="text-left bg-black/50 p-8 border-2 border-amber-900 mb-10 space-y-2">
+              <p className="font-black text-xl">가문: {myPlayer.teamId}번 모둠</p>
+              <p className="font-bold">임무: {myPlayer.role}</p>
+              {myPlayer.role === Role.COMBAT && <p className="font-bold">직업: {myPlayer.classType}</p>}
             </div>
-            <button onClick={() => { network.sendAction({ type: 'CANCEL_SELECTION', payload: { playerId: myPlayer.id, teamId: myPlayer.teamId } }); setMyPlayer(null); }} className="px-8 py-3 bg-red-600 rounded-xl font-bold">선택 취소</button>
+            <button onClick={() => { network.sendAction({ type: 'CANCEL_SELECTION', payload: { playerId: myPlayer.id, teamId: myPlayer.teamId } }); setMyPlayer(null); }} className="px-10 py-3 bg-red-900 border-2 border-red-600 font-bold text-white hover:bg-red-800">서약 파기</button>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-6 max-w-6xl w-full overflow-y-auto custom-scrollbar pr-4">
+          <div className="grid grid-cols-3 gap-6 max-w-7xl w-full overflow-y-auto custom-scrollbar pr-4 pb-32">
             {[1,2,3,4,5,6,7,8,9].map(tId => {
-              /* Fix: Cast players in map to Player for type safety */
               const teamP = players.filter(p => (p as Player).teamId === tId.toString()) as Player[];
               const qT = teamP.some(p => p.role === Role.QUIZ);
               const cT = teamP.some(p => p.role === Role.COMBAT);
               const sC = teamP.filter(p => p.role === Role.SUPPORT).length;
               return (
-                <div key={tId} className="bg-slate-900 p-6 rounded-3xl border border-white/10">
-                  <h3 className="text-2xl font-black mb-4 italic">{tId} Team</h3>
-                  <div className="space-y-2">
-                    <button disabled={qT} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.QUIZ })} className={`w-full p-3 rounded-xl text-left font-black text-sm flex justify-between ${pendingSelection?.teamId === tId.toString() && pendingSelection?.role === Role.QUIZ ? 'bg-blue-600 ring-2 ring-white' : 'bg-slate-800'}`}>🧠 문제풀이 {qT && '✔'}</button>
-                    <button disabled={sC >= 2} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.SUPPORT })} className={`w-full p-3 rounded-xl text-left font-black text-sm flex justify-between ${pendingSelection?.teamId === tId.toString() && pendingSelection?.role === Role.SUPPORT ? 'bg-emerald-600 ring-2 ring-white' : 'bg-slate-800'}`}>🛡️ 서포터 ({sC}/2)</button>
-                    <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-white/5">
-                      {[ClassType.WARRIOR, ClassType.MAGE, ClassType.ARCHER, ClassType.ROGUE].map(ct => (
-                        <button key={ct} disabled={cT} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.COMBAT, classType: ct })} className={`p-2 rounded-lg text-[10px] font-black ${pendingSelection?.classType === ct && pendingSelection?.teamId === tId.toString() ? 'bg-red-600 ring-2 ring-white' : 'bg-black'}`}>{ct}</button>
-                      ))}
+                <div key={tId} className="bg-slate-900 p-8 border-4 border-amber-900/50 shadow-inner">
+                  <h3 className="text-3xl font-black mb-6 italic border-b border-amber-900 pb-2">{tId}번 성채</h3>
+                  <div className="space-y-3">
+                    <button disabled={qT} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.QUIZ })} className={`w-full p-4 font-black text-sm flex justify-between border-2 transition-all ${pendingSelection?.teamId === tId.toString() && pendingSelection?.role === Role.QUIZ ? 'bg-amber-700 border-amber-300 scale-105' : 'bg-black border-amber-900 disabled:opacity-30'}`}>📜 지략가 {qT && '✔'}</button>
+                    <button disabled={sC >= 2} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.SUPPORT })} className={`w-full p-4 font-black text-sm flex justify-between border-2 transition-all ${pendingSelection?.teamId === tId.toString() && pendingSelection?.role === Role.SUPPORT ? 'bg-amber-700 border-amber-300 scale-105' : 'bg-black border-amber-900 disabled:opacity-30'}`}>🛡️ 조력자 ({sC}/2)</button>
+                    <div className="pt-4 border-t border-amber-900/30 mt-2">
+                       <p className="text-[10px] font-bold text-amber-800 mb-3 uppercase tracking-widest">전투 클래스 선발</p>
+                       <div className="grid grid-cols-2 gap-2">
+                          {[ClassType.WARRIOR, ClassType.MAGE, ClassType.ARCHER, ClassType.ROGUE].map(ct => (
+                            <button key={ct} disabled={cT} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.COMBAT, classType: ct })} className={`p-3 text-[11px] font-black border transition-all ${pendingSelection?.classType === ct && pendingSelection?.teamId === tId.toString() ? 'bg-amber-700 border-amber-300' : 'bg-black border-amber-950 disabled:opacity-20'}`}>
+                              {ct === ClassType.WARRIOR ? '🗡️ 전사' : ct === ClassType.MAGE ? '🔮 마법사' : ct === ClassType.ARCHER ? '🏹 궁수' : '👤 도적'}
+                            </button>
+                          ))}
+                       </div>
                     </div>
                   </div>
                 </div>
@@ -384,7 +439,7 @@ const App: React.FC = () => {
           <button disabled={!pendingSelection} onClick={() => {
             const p = { id: userName, name: userName, teamId: pendingSelection!.teamId, role: pendingSelection!.role, classType: pendingSelection!.classType || ClassType.WARRIOR, points: 0, hasSubmittedQuiz: false } as Player;
             setMyPlayer(p); network.sendAction({ type: 'CONFIRM_SELECTION', payload: { player: p } });
-          }} className="fixed bottom-10 px-20 py-6 bg-blue-600 rounded-3xl font-black text-3xl shadow-2xl disabled:opacity-50 transition-all">전장 참여</button>
+          }} className="fixed bottom-10 px-24 py-8 bg-amber-800 border-4 border-amber-400 font-black text-4xl text-white shadow-2xl disabled:opacity-50 hover:bg-amber-700 transition-all uppercase tracking-tighter">성배에 서약</button>
         )}
       </div>
     );
@@ -393,136 +448,142 @@ const App: React.FC = () => {
   if (view === 'game') {
     const isTeacher = isHost;
     const team = myPlayer ? gameState.teams[myPlayer.teamId] : null;
-    const currentQuiz = gameState.quizzes[gameState.currentQuizIndex] || { question: "대기 중...", options: ["-","-","-","-"], answer: 0 };
+    const currentQuiz = gameState.quizzes[gameState.currentQuizIndex] || { question: "현자의 두루마리를 펼치는 중...", options: ["-","-","-","-"], answer: 0 };
     
     if (gameState.phase === 'GAME_OVER') {
       const winTeam = gameState.winnerTeamId ? gameState.teams[gameState.winnerTeamId] : null;
       return (
-        <div className="fixed inset-0 bg-black flex flex-col items-center justify-center p-10 text-white z-[9999]">
-          <h1 className="text-9xl font-black italic mb-10 text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-yellow-600">VICTORY</h1>
+        <div className="fixed inset-0 bg-[#0a0a0a] flex flex-col items-center justify-center p-10 text-amber-100 z-[9999] bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
+          <h1 className="text-9xl font-black italic mb-10 text-amber-500 drop-shadow-[0_0_20px_rgba(255,255,255,0.3)]">CHAMPION</h1>
           {winTeam ? (
-            <div className="text-center space-y-4 bg-slate-900 p-16 rounded-[4rem] border-8 border-amber-500 shadow-2xl">
-              <p className="text-5xl font-black">{winTeam.name}</p>
-              <p className="text-2xl font-bold text-amber-500 uppercase">{winTeam.classType} CLASS</p>
-              <div className="flex gap-10 justify-center mt-10">
-                <div className="text-center"><p className="text-xs text-slate-500">SCORE</p><p className="text-4xl font-black">{winTeam.points}</p></div>
-                <div className="text-center"><p className="text-xs text-slate-500">DAMAGE</p><p className="text-4xl font-black">{winTeam.totalDamageDealt?.toFixed(0)}</p></div>
+            <div className="text-center space-y-4 bg-slate-900 p-20 border-double border-[12px] border-amber-600 shadow-[0_0_100px_rgba(217,119,6,0.5)]">
+              <p className="text-6xl font-black text-amber-200">{winTeam.name} 가문</p>
+              <p className="text-3xl font-bold text-amber-700 tracking-[0.5em] uppercase border-y border-amber-900 py-4">{winTeam.classType} CLASS</p>
+              <div className="flex gap-16 justify-center mt-12">
+                <div className="text-center"><p className="text-xs text-amber-800 font-bold uppercase mb-2">Renown</p><p className="text-5xl font-black text-amber-500">{winTeam.points}</p></div>
+                <div className="text-center"><p className="text-xs text-amber-800 font-bold uppercase mb-2">Might</p><p className="text-5xl font-black text-amber-500">{winTeam.totalDamageDealt?.toFixed(0)}</p></div>
               </div>
             </div>
-          ) : <p className="text-4xl">승자가 없습니다.</p>}
-          <button onClick={() => window.location.reload()} className="mt-20 px-12 py-5 bg-white text-black font-black rounded-full text-2xl">다시 도전하기</button>
+          ) : <p className="text-4xl">살아남은 영웅이 없습니다.</p>}
+          <button onClick={() => window.location.reload()} className="mt-20 px-16 py-6 bg-amber-800 border-4 border-amber-500 text-white font-black rounded-none text-3xl shadow-lg hover:bg-amber-700">전설을 다시 쓰기</button>
         </div>
       );
     }
 
     return (
       <div className={`fixed inset-0 flex flex-col md:flex-row bg-[#020617] overflow-hidden`}>
-        <div className={`flex-1 relative ${gameState.phase === 'QUIZ' ? 'opacity-50' : ''}`}>
+        <div className={`flex-1 relative ${gameState.phase === 'QUIZ' ? 'opacity-40 grayscale' : ''} transition-all duration-1000`}>
           <GameCanvas teams={gameState.teams} myTeamId={myPlayer?.teamId} />
-          <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-black/80 px-10 py-4 rounded-3xl border-4 border-white/20 text-center backdrop-blur-md">
-            <p className="text-[10px] font-black uppercase text-blue-400 tracking-widest">{gameState.phase} PHASE</p>
-            <p className="text-5xl font-mono font-black">{gameState.timer}s</p>
+          <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-black/80 px-14 py-6 border-double border-8 border-amber-900/80 text-center backdrop-blur-md shadow-2xl">
+            <p className="text-[10px] font-black uppercase text-amber-600 tracking-[0.4em] mb-1">{gameState.phase} PHASE</p>
+            <p className="text-6xl font-mono font-black text-amber-100">{gameState.timer}s</p>
           </div>
           {myPlayer?.role === Role.COMBAT && gameState.phase === 'BATTLE' && team && !team.isDead && (
             <>
-              <div className="absolute bottom-12 left-12 scale-150"><Joystick onMove={(dir) => network.sendAction({ type: 'MOVE', payload: { teamId: myPlayer.teamId, dir } })} /></div>
-              <div className="absolute bottom-12 right-12 flex items-end gap-6">
+              <div className="absolute bottom-12 left-12 scale-150 grayscale-0"><Joystick onMove={(dir) => network.sendAction({ type: 'MOVE', payload: { teamId: myPlayer.teamId, dir } })} /></div>
+              <div className="absolute bottom-12 right-12 flex items-end gap-6 grayscale-0">
                 <div className="flex flex-col gap-4">
                   {team.unlockedSkills.map(skId => {
                     const sk = SKILLS_INFO[team.classType].find(s => s.id === skId);
                     const cd = Math.max(0, Math.ceil(((team.skillCooldowns[skId] || 0) - Date.now()) / 1000));
                     return (
-                      <button key={skId} disabled={cd > 0 || team.mp < (sk?.mp || 0)} onClick={() => network.sendAction({ type: 'SKILL_USE', payload: { teamId: myPlayer.teamId, skId } })} className={`px-6 py-4 rounded-2xl font-black text-sm border-4 transition-all ${cd > 0 ? 'bg-slate-800 border-slate-600 opacity-50' : 'bg-blue-600 border-white/20 active:scale-90 shadow-xl'}`}>
-                        {sk?.name} {cd > 0 ? `(${cd}s)` : `(${sk?.mp}M)`}
+                      <button key={skId} disabled={cd > 0 || team.mp < (sk?.mp || 0)} onClick={() => network.sendAction({ type: 'SKILL_USE', payload: { teamId: myPlayer.teamId, skId } })} className={`px-8 py-5 rounded-none font-black text-sm border-2 transition-all ${cd > 0 ? 'bg-slate-800 border-slate-600 opacity-50' : 'bg-amber-900 border-amber-400 text-amber-100 hover:bg-amber-800 shadow-[inset_0_0_10px_rgba(0,0,0,0.5)]'}`}>
+                        {sk?.name} {cd > 0 ? `(${cd}s)` : `(${sk?.mp} MP)`}
                       </button>
                     );
                   })}
                 </div>
-                <button onClick={() => network.sendAction({ type: 'ATTACK', payload: { teamId: myPlayer.teamId } })} className="w-44 h-44 bg-red-600 rounded-full font-black text-6xl shadow-2xl border-8 border-white/30 active:scale-95 transition-all">⚔️</button>
+                <button onClick={() => network.sendAction({ type: 'ATTACK', payload: { teamId: myPlayer.teamId } })} className="w-48 h-48 bg-red-900 text-white rounded-full font-black text-6xl shadow-[0_0_50px_rgba(220,38,38,0.5)] border-8 border-amber-900 active:scale-90 transition-all flex items-center justify-center">⚔️</button>
               </div>
             </>
           )}
         </div>
 
-        <div className={`w-full md:w-[400px] border-l-4 border-white/10 p-6 overflow-y-auto custom-scrollbar bg-slate-900/50 backdrop-blur-xl`}>
+        <div className={`w-full md:w-[450px] border-l-8 border-amber-950 p-8 overflow-y-auto custom-scrollbar bg-slate-900 text-amber-100 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] shadow-inner`}>
           {isTeacher ? (
-            <div className="space-y-6">
-              <h3 className="text-3xl font-black italic text-blue-500 border-b border-white/10 pb-4 uppercase">Host Console</h3>
-              <div className="bg-black/50 p-6 rounded-3xl border border-white/10 space-y-4">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Quiz Status</p>
-                <p className="text-xl font-black leading-tight">Q: {currentQuiz.question}</p>
-                <button onClick={() => setShowAnswer(!showAnswer)} className="w-full py-3 bg-white/5 rounded-xl font-bold text-sm">정답 {showAnswer ? '숨기기' : '보기'}</button>
-                {showAnswer && <p className="text-center font-black text-emerald-400 text-lg">A: {currentQuiz.options[currentQuiz.answer]}</p>}
+            <div className="space-y-8">
+              <h3 className="text-4xl font-black italic text-amber-600 border-b-4 border-amber-900 pb-4 uppercase tracking-tighter">Master's Mirror</h3>
+              <div className="bg-black/80 p-8 border-4 border-amber-900 space-y-6">
+                <p className="text-xs font-bold text-amber-800 uppercase tracking-[0.3em]">Oracle's Current Question</p>
+                <p className="text-2xl font-black leading-tight text-amber-100 italic">" {currentQuiz.question} "</p>
+                <button onClick={() => setShowAnswer(!showAnswer)} className="w-full py-4 bg-amber-900/20 border-2 border-amber-900 font-bold text-xs uppercase tracking-widest hover:bg-amber-900/40">진실의 눈 {showAnswer ? '감기' : '뜨기'}</button>
+                {showAnswer && <p className="text-center font-black text-amber-400 text-2xl border-t border-amber-900 pt-6">A: {currentQuiz.options[currentQuiz.answer]}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <button onClick={() => handleHostAction({type:'ADJUST_TIMER', payload:{amount:5}})} className="bg-emerald-600 py-4 rounded-2xl font-black">+5s</button>
-                <button onClick={() => handleHostAction({type:'ADJUST_TIMER', payload:{amount:-5}})} className="bg-rose-600 py-4 rounded-2xl font-black">-5s</button>
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => handleHostAction({type:'ADJUST_TIMER', payload:{amount:10}})} className="bg-amber-800/40 border-2 border-amber-600 py-5 font-black text-lg">+10s</button>
+                <button onClick={() => handleHostAction({type:'ADJUST_TIMER', payload:{amount:-10}})} className="bg-red-900/40 border-2 border-red-600 py-5 font-black text-lg">-10s</button>
               </div>
-              <button onClick={() => handleHostAction({type:'SKIP_PHASE', payload:{}})} className="w-full bg-blue-600 py-5 rounded-2xl font-black text-xl shadow-xl">페이즈 즉시 스킵</button>
+              <button onClick={() => handleHostAction({type:'SKIP_PHASE', payload:{}})} className="w-full bg-amber-800 border-4 border-amber-400 py-6 font-black text-2xl shadow-2xl hover:bg-amber-700">시공간 가속</button>
             </div>
           ) : myPlayer?.role === Role.QUIZ ? (
-            <div className="space-y-8">
-              <h3 className="text-3xl font-black italic text-violet-400">BRAIN</h3>
+            <div className="space-y-10">
+              <h3 className="text-4xl font-black italic text-amber-600 uppercase tracking-tighter">The Sage</h3>
               {gameState.phase === 'QUIZ' ? (
                 gameState.players[myPlayer.id].hasSubmittedQuiz ? (
-                  <div className="text-center py-20 bg-black/30 rounded-3xl border-2 border-white/10 animate-pulse"><p className="text-6xl mb-4">✅</p><p className="font-black text-xl">정답 제출 완료!</p></div>
+                  <div className="text-center py-24 bg-black/50 border-double border-8 border-amber-900 shadow-inner animate-pulse">
+                    <p className="text-8xl mb-8">📜</p>
+                    <p className="font-black text-3xl text-amber-200">명계에 지혜가 전달되었습니다.</p>
+                  </div>
                 ) : (
-                  <div className="space-y-4">
-                    <div className="p-6 bg-slate-950 rounded-3xl border-2 border-violet-500 font-bold text-lg mb-4">{currentQuiz.question}</div>
+                  <div className="space-y-6">
+                    <div className="p-8 bg-black border-4 border-amber-600 font-bold text-xl mb-6 shadow-inner italic leading-relaxed text-amber-100">" {currentQuiz.question} "</div>
                     {currentQuiz.options.map((opt, i) => (
-                      <button key={i} onClick={() => network.sendAction({ type: 'QUIZ_ANSWER', payload: { playerId: myPlayer.id, teamId: myPlayer.teamId, correct: i === currentQuiz.answer } })} className="w-full p-5 bg-violet-600 rounded-2xl text-left font-black text-sm hover:bg-violet-500 transition-all active:scale-95 shadow-lg">
-                        <span className="bg-white/20 px-3 py-1 rounded-lg mr-4 font-mono">{i+1}</span> {opt}
+                      <button key={i} onClick={() => network.sendAction({ type: 'QUIZ_ANSWER', payload: { playerId: myPlayer.id, teamId: myPlayer.teamId, correct: i === currentQuiz.answer } })} className="w-full p-6 bg-amber-950 border-2 border-amber-700 text-left font-black text-lg hover:bg-amber-800 transition-all active:scale-95 shadow-lg group">
+                        <span className="bg-amber-400 text-black px-4 py-1 rounded-none mr-6 font-mono font-black group-hover:scale-110 inline-block">{i+1}</span> 
+                        <span className="text-amber-100">{opt}</span>
                       </button>
                     ))}
                   </div>
                 )
-              ) : <div className="p-20 text-center opacity-30 font-black italic">BATTLE PHASE<br/>지략가의 시간입니다.</div>}
+              ) : <div className="p-24 text-center opacity-40 font-black italic border-4 border-amber-950 bg-black/30">격전의 소용돌이...<br/>지혜를 갈고 닦으십시오.</div>}
             </div>
           ) : myPlayer?.role === Role.SUPPORT && team ? (
-            <div className="space-y-6 pb-20">
-              <div className="flex justify-between items-center bg-black/40 p-5 rounded-3xl border-2 border-emerald-500/50 sticky top-0 z-10 backdrop-blur-md">
-                <h3 className="text-2xl font-black italic text-emerald-400">SUPPORT</h3>
-                <span className="bg-amber-500 text-black px-5 py-1 rounded-full font-black italic">{team.points} P</span>
+            <div className="space-y-8 pb-24">
+              <div className="flex justify-between items-center bg-black p-6 border-double border-8 border-amber-900 sticky top-0 z-10 shadow-2xl">
+                <h3 className="text-2xl font-black italic text-amber-600 uppercase">Artisan</h3>
+                <span className="bg-amber-400 text-black px-6 py-1 font-black text-2xl shadow-inner">{team.points} P</span>
               </div>
-              <div className="space-y-6">
+              <div className="space-y-8">
                 <section>
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Permanent Items (4P)</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'weapon', cost:4}})} className={`p-4 rounded-2xl flex flex-col items-center gap-1 border transition-all ${team.items.weapon ? 'bg-amber-600 border-white text-white' : 'bg-slate-900 border-white/10 opacity-60'}`} disabled={team.items.weapon}><span>⚔️</span><span className="text-[10px] font-black">무기</span></button>
-                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'armor', cost:4}})} className={`p-4 rounded-2xl flex flex-col items-center gap-1 border transition-all ${team.items.armor ? 'bg-amber-600 border-white text-white' : 'bg-slate-900 border-white/10 opacity-60'}`} disabled={team.items.armor}><span>🛡️</span><span className="text-[10px] font-black">갑옷</span></button>
-                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'boots', cost:4}})} className={`p-4 rounded-2xl flex flex-col items-center gap-1 border transition-all ${team.items.boots ? 'bg-amber-600 border-white text-white' : 'bg-slate-900 border-white/10 opacity-60'}`} disabled={team.items.boots}><span>👟</span><span className="text-[10px] font-black">신발</span></button>
+                  <p className="text-[10px] font-black text-amber-800 uppercase tracking-[0.5em] mb-4 border-b border-amber-900/30 pb-1">Legendary Relics (4P)</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'weapon', cost:4}})} className={`p-5 flex flex-col items-center gap-2 border-2 transition-all ${team.items.weapon ? 'bg-amber-800 border-amber-300' : 'bg-black border-amber-950 opacity-40'}`} disabled={team.items.weapon}><span className="text-3xl">⚔️</span><span className="text-[10px] font-black">신검</span></button>
+                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'armor', cost:4}})} className={`p-5 flex flex-col items-center gap-2 border-2 transition-all ${team.items.armor ? 'bg-amber-800 border-amber-300' : 'bg-black border-amber-950 opacity-40'}`} disabled={team.items.armor}><span className="text-3xl">🛡️</span><span className="text-[10px] font-black">성갑</span></button>
+                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'boots', cost:4}})} className={`p-5 flex flex-col items-center gap-2 border-2 transition-all ${team.items.boots ? 'bg-amber-800 border-amber-300' : 'bg-black border-amber-950 opacity-40'}`} disabled={team.items.boots}><span className="text-3xl">👟</span><span className="text-[10px] font-black">비신</span></button>
                   </div>
                 </section>
                 <section>
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Unlock Skills (6P)</p>
-                  <div className="space-y-2">
+                  <p className="text-[10px] font-black text-amber-800 uppercase tracking-[0.5em] mb-4 border-b border-amber-900/30 pb-1">Master Grimoires (6P)</p>
+                  <div className="space-y-3">
                     {SKILLS_INFO[team.classType].map(sk => (
-                      <button key={sk.id} disabled={team.unlockedSkills.includes(sk.id)} onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'SKILL', skillId:sk.id, cost:6}})} className="w-full p-4 bg-slate-900 border border-white/10 rounded-2xl text-left disabled:opacity-30 group transition-all">
-                        <div className="flex justify-between font-black text-xs mb-1"><span>{sk.name}</span><span className="bg-white/10 px-2 rounded">6P</span></div>
-                        <p className="text-[10px] text-slate-500 leading-tight">{sk.desc}</p>
+                      <button key={sk.id} disabled={team.unlockedSkills.includes(sk.id)} onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'SKILL', skillId:sk.id, cost:6}})} className="w-full p-5 bg-black border-2 border-amber-900 hover:border-amber-600 text-left disabled:opacity-20 group transition-all">
+                        <div className="flex justify-between font-black text-sm mb-2"><span className="text-amber-200">{sk.name}</span><span className="text-amber-600 font-mono">6P</span></div>
+                        <p className="text-[10px] text-amber-800 italic leading-snug font-bold group-hover:text-amber-500 transition-colors">{sk.desc}</p>
                       </button>
                     ))}
                   </div>
                 </section>
                 <section>
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Team Buffs & Recovery</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'hp', cost:3}})} className="p-3 bg-rose-900/20 border border-rose-500/30 rounded-xl text-xs font-black">❤️ 체력 (3P)</button>
-                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'mp', cost:3}})} className="p-3 bg-blue-900/20 border border-blue-500/30 rounded-xl text-xs font-black">💧 마력 (3P)</button>
-                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'atk', cost:5}})} className="p-3 bg-slate-800 border border-white/10 rounded-xl text-xs font-black">⚔️ 공격 (5P)</button>
-                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'def', cost:5}})} className="p-3 bg-slate-800 border border-white/10 rounded-xl text-xs font-black">🛡️ 방어 (5P)</button>
+                  <p className="text-[10px] font-black text-amber-800 uppercase tracking-[0.5em] mb-4 border-b border-amber-900/30 pb-1">Potions & Blessings</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'hp', cost:3}})} className="p-4 bg-red-950/20 border-2 border-red-900 text-xs font-black hover:bg-red-900/40">생명 수혈 (3P)</button>
+                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'mp', cost:3}})} className="p-4 bg-blue-950/20 border-2 border-blue-900 text-xs font-black hover:bg-blue-900/40">정수 주입 (3P)</button>
+                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'atk', cost:5}})} className="p-4 bg-amber-900/10 border-2 border-amber-900 text-xs font-black hover:bg-amber-900/30">공격 축복 (5P)</button>
+                    <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'def', cost:5}})} className="p-4 bg-amber-900/10 border-2 border-amber-900 text-xs font-black hover:bg-amber-900/30">방어 축복 (5P)</button>
                   </div>
-                  <button disabled={!team.isDead} onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'revive', cost:8}})} className={`w-full mt-3 py-4 rounded-2xl font-black border-4 transition-all ${team.isDead ? 'bg-emerald-600 border-white shadow-xl animate-bounce' : 'bg-slate-950 border-white/5 opacity-20'}`}>✨ 팀원 부활 (8P)</button>
+                  <button disabled={!team.isDead} onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'revive', cost:8}})} className={`w-full mt-6 py-6 border-double border-8 font-black text-xl transition-all ${team.isDead ? 'bg-amber-700 border-amber-200 text-white shadow-[0_0_30px_rgba(180,83,9,0.8)] animate-bounce' : 'bg-black border-amber-950 opacity-20'}`}>⚡ 영혼 소생 (8P)</button>
                 </section>
               </div>
             </div>
           ) : (
-            <div className="h-full flex flex-col justify-center items-center gap-6">
-              <div className="text-[12rem] animate-bounce">{team?.classType === ClassType.WARRIOR ? '🛡️' : team?.classType === ClassType.MAGE ? '🔮' : team?.classType === ClassType.ARCHER ? '🏹' : '🗡️'}</div>
-              <p className="text-4xl font-black text-red-500 uppercase italic tracking-widest">{team?.classType}</p>
-              <div className="grid grid-cols-2 gap-4 w-full bg-black/40 p-8 rounded-[3rem] border-2 border-white/5 font-black text-center">
-                <div><p className="text-[10px] text-slate-500 uppercase">Attack</p><p className="text-2xl text-blue-400">{team?.stats.atk}</p></div>
-                <div><p className="text-[10px] text-slate-500 uppercase">Defense</p><p className="text-2xl text-emerald-400">{team?.stats.def}</p></div>
+            <div className="h-full flex flex-col justify-center items-center gap-10">
+              <div className="text-[16rem] drop-shadow-[0_0_50px_rgba(255,255,255,0.1)] grayscale-0 animate-pulse">
+                {team?.classType === ClassType.WARRIOR ? '🗡️' : team?.classType === ClassType.MAGE ? '🔮' : team?.classType === ClassType.ARCHER ? '🏹' : '👤'}
+              </div>
+              <p className="text-6xl font-black text-amber-600 uppercase italic tracking-widest border-y-4 border-amber-900 py-4 w-full text-center">{team?.classType}</p>
+              <div className="grid grid-cols-2 gap-8 w-full bg-black/80 p-10 border-double border-8 border-amber-950 font-black text-center shadow-2xl">
+                <div><p className="text-xs text-amber-800 uppercase tracking-widest mb-3">Might (ATK)</p><p className="text-4xl text-amber-200">{team?.stats.atk}</p></div>
+                <div><p className="text-xs text-amber-800 uppercase tracking-widest mb-3">Warden (DEF)</p><p className="text-4xl text-amber-200">{team?.stats.def}</p></div>
               </div>
             </div>
           )}
