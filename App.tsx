@@ -102,6 +102,7 @@ const App: React.FC = () => {
   const downloadCSVTemplate = () => {
     const headers = "문제,보기1,보기2,보기3,보기4,정답(1-4)\n";
     const sample = "사과는 영어로 무엇일까요?,Apple,Banana,Orange,Grape,1\n";
+    // 한글 깨짐 방지를 위한 BOM 추가
     const blob = new Blob(["\ufeff" + headers + sample], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
@@ -122,12 +123,13 @@ const App: React.FC = () => {
       const lines = text.split('\n').slice(1);
       const loadedQuizzes: Quiz[] = lines.filter(l => l.trim()).map(line => {
         const parts = line.split(',');
+        if (parts.length < 6) return null;
         return {
           question: parts[0]?.trim() || "",
           options: [parts[1], parts[2], parts[3], parts[4]].map(o => o?.trim() || ""),
           answer: (parseInt(parts[5]) - 1) || 0
         };
-      }).filter(q => q.question !== "");
+      }).filter((q): q is Quiz => q !== null && q.question !== "");
       setQuizList([...quizList, ...loadedQuizzes]);
     };
     reader.readAsText(file);
@@ -149,16 +151,18 @@ const App: React.FC = () => {
     };
     
     setGameState(initialState);
+    // PeerJS 초기화 및 방 생성
     network.init(finalCode, true, (state) => setGameState(state));
     setView('host_lobby');
   };
 
   const joinRoom = () => {
-    if (!roomCode || !userName) return alert("닉네임과 방 코드를 입력하세요.");
+    const targetCode = roomCode.trim().toUpperCase();
+    if (!targetCode || !userName) return alert("닉네임과 방 코드를 입력하세요.");
     setIsHost(false);
-    network.init(roomCode, false, (state) => {
+    network.init(targetCode, false, (state) => {
       setGameState(state);
-      if (state.isStarted && view !== 'game') setView('game');
+      if (state.isStarted) setView('game');
     });
     setView('lobby');
   };
@@ -216,11 +220,12 @@ const App: React.FC = () => {
               </div>
               <button onClick={() => { if(newQuiz.question) { setQuizList([...quizList, newQuiz]); setNewQuiz({question:'', options:['','','',''], answer:0}); } }} className="w-full py-4 bg-blue-600 rounded-2xl font-black">추가</button>
             </div>
-            <div className="bg-slate-900 p-8 rounded-[3rem] border border-emerald-500/20 shadow-2xl space-y-4">
-              <h3 className="text-xl font-black">2. CSV 업로드</h3>
+            <div className="bg-slate-900 p-8 rounded-[3rem] border border-emerald-500/20 shadow-2xl space-y-4 text-center">
+              <h3 className="text-xl font-black mb-2">2. CSV 업로드</h3>
+              <p className="text-xs text-slate-500 mb-4">엑셀/한셀에서 작성 후 CSV로 저장하세요.</p>
               <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileUpload} />
-              <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded-2xl font-bold">파일 선택</button>
-              <button onClick={downloadCSVTemplate} className="w-full text-xs text-emerald-500/70 hover:text-emerald-500 underline decoration-dotted">샘플 양식 다운로드(.csv)</button>
+              <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded-2xl font-bold mb-2">파일 선택</button>
+              <button onClick={downloadCSVTemplate} className="text-xs text-emerald-500/70 hover:text-emerald-500 underline decoration-dotted">샘플 양식 다운로드(.csv)</button>
             </div>
           </div>
           <div className="col-span-7 space-y-8">
@@ -234,8 +239,8 @@ const App: React.FC = () => {
                ))}
             </div>
             <div className="flex gap-4">
-               <input className="flex-1 p-4 bg-slate-900 border border-white/10 rounded-2xl text-center text-2xl font-black uppercase tracking-widest" placeholder="커스텀 방 코드" value={customCode} onChange={e => setCustomCode(e.target.value)} />
-               <button onClick={createRoom} className="px-10 py-6 bg-blue-600 hover:bg-blue-500 rounded-2xl font-black text-2xl shadow-xl transition-all">전장 생성</button>
+               <input className="flex-1 p-4 bg-slate-900 border border-white/10 rounded-2xl text-center text-2xl font-black uppercase tracking-widest" placeholder="커스텀 방 코드 (예: CLASS1)" value={customCode} onChange={e => setCustomCode(e.target.value)} />
+               <button onClick={createRoom} className="px-10 py-6 bg-blue-600 hover:bg-blue-500 rounded-2xl font-black text-2xl shadow-xl transition-all">방 만들기</button>
             </div>
           </div>
         </div>
@@ -271,9 +276,9 @@ const App: React.FC = () => {
               <div key={tId} className={`bg-slate-900/80 p-6 rounded-[2.5rem] border transition-all ${teamPlayers.length > 0 ? 'border-blue-500/50 shadow-xl' : 'border-white/5 opacity-50'}`}>
                 <h3 className="text-2xl font-black italic border-b border-white/10 pb-2 mb-4">{tId} 모둠</h3>
                 <div className="space-y-3 text-sm">
-                  <div className={`p-3 rounded-xl flex justify-between font-bold ${qUser ? 'bg-blue-600/20 text-blue-400' : 'bg-white/5 text-slate-600'}`}><span>🧠 {qUser?.name || '문제풀이'}</span><span>{qUser ? 'OK' : 'EMPTY'}</span></div>
+                  <div className={`p-3 rounded-xl flex justify-between font-bold ${qUser ? 'bg-blue-600/20 text-blue-400' : 'bg-white/5 text-slate-600'}`}><span>🧠 {qUser?.name || '문제풀이'}</span><span>{qUser ? 'OK' : 'WAIT'}</span></div>
                   <div className={`p-3 rounded-xl flex justify-between font-bold ${sUsers.length > 0 ? 'bg-emerald-600/20 text-emerald-400' : 'bg-white/5 text-slate-600'}`}><span>🛡️ {sUsers.map(s => s.name).join(', ') || '서포터'}</span><span>{sUsers.length}/2</span></div>
-                  <div className={`p-3 rounded-xl flex justify-between font-bold ${cUser ? 'bg-red-600/20 text-red-400' : 'bg-white/5 text-slate-600'}`}><span>⚔️ {cUser ? `${cUser.name}(${cUser.classType})` : '전투요원'}</span><span>{cUser ? 'OK' : 'EMPTY'}</span></div>
+                  <div className={`p-3 rounded-xl flex justify-between font-bold ${cUser ? 'bg-red-600/20 text-red-400' : 'bg-white/5 text-slate-600'}`}><span>⚔️ {cUser ? `${cUser.name}(${cUser.classType})` : '전투요원'}</span><span>{cUser ? 'OK' : 'WAIT'}</span></div>
                 </div>
               </div>
             );
@@ -283,6 +288,7 @@ const App: React.FC = () => {
     );
   }
 
+  // ... 나머지 UI (lobby, game)는 동일하게 유지
   if (view === 'lobby') {
     const players = Object.values(gameState.players) as Player[];
     return (

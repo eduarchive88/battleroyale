@@ -24,17 +24,28 @@ class P2PNetwork {
     this.onStateChange = onStateChange;
     const peerId = `edu-arena-${roomCode}`;
 
+    // Clean up existing peer if any
     if (this.peer) {
       this.peer.destroy();
+      this.connections = {};
     }
 
+    // Initialize Peer
+    // Use undefined ID for guests, fixed ID for host
     this.peer = new Peer(isHost ? peerId : undefined, {
-      debug: 2
+      debug: 2,
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ]
+      }
     });
 
     this.peer.on('open', (id: string) => {
-      console.log('Peer connected with ID:', id);
+      console.log(`Peer opened with ID: ${id}`);
       if (!isHost) {
+        console.log(`Attempting to connect to host: ${peerId}`);
         this.connectToHost(peerId);
       }
     });
@@ -42,7 +53,9 @@ class P2PNetwork {
     this.peer.on('error', (err: any) => {
       console.error('Peer error:', err.type, err);
       if (err.type === 'unavailable-id' && isHost) {
-        alert("이미 사용 중인 방 코드입니다. 다른 코드를 사용하세요.");
+        alert("이미 사용 중인 방 코드입니다. 다른 코드를 입력하세요.");
+      } else if (err.type === 'peer-not-found' && !isHost) {
+        alert("방을 찾을 수 없습니다. 코드를 확인하세요.");
       }
     });
 
@@ -54,16 +67,18 @@ class P2PNetwork {
   }
 
   private connectToHost(hostId: string) {
-    const conn = this.peer.connect(hostId);
+    const conn = this.peer.connect(hostId, {
+      reliable: true
+    });
     this.setupConnection(conn);
   }
 
   private setupConnection(conn: any) {
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
-      console.log('Connection established with:', conn.peer);
+      console.log('Connected to:', conn.peer);
       
-      // If student connects, send current state immediately (if Host)
+      // If student connects, Host should send current state immediately
       if (this.isHost && this.gameState) {
         this.broadcastState(this.gameState);
       }
