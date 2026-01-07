@@ -29,6 +29,13 @@ const App: React.FC = () => {
   const [newQuiz, setNewQuiz] = useState<Quiz>({ question: '', options: ['', '', '', ''], answer: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 게임 시작 상태 감시하여 화면 전환
+  useEffect(() => {
+    if (gameState.isStarted && view !== 'game') {
+      setView('game');
+    }
+  }, [gameState.isStarted, view]);
+
   useEffect(() => {
     if (isHost) {
       network.setActionListener((action: any) => {
@@ -64,7 +71,7 @@ const App: React.FC = () => {
       }
       case 'MOVE': {
         const { teamId, dir } = action.payload;
-        if (newState.teams[teamId]) {
+        if (newState.teams[teamId] && !newState.teams[teamId].isDead) {
           newState.teams[teamId].x = Math.max(0, Math.min(1000, newState.teams[teamId].x + dir.x * 25));
           newState.teams[teamId].y = Math.max(0, Math.min(1000, newState.teams[teamId].y + dir.y * 25));
         }
@@ -89,6 +96,7 @@ const App: React.FC = () => {
         const { teamId, correct } = action.payload;
         if (newState.teams[teamId]) {
           newState.teams[teamId].points += correct ? 10 : 2;
+          // 퀴즈 하나 풀면 다음 퀴즈 혹은 전투 페이즈 전환 로직 (임시로 전투 전환)
           newState.phase = 'BATTLE'; 
         }
         break;
@@ -106,13 +114,11 @@ const App: React.FC = () => {
     const finalCode = codeInput.toUpperCase();
     setIsConnecting(true);
     
-    // 네트워크 초기화
     network.init(
       finalCode, 
       true, 
       (state) => setGameState(state),
       () => {
-        // Peer 오픈 성공 시 실행
         setIsHost(true);
         setIsConnecting(false);
         setRoomCode(finalCode);
@@ -131,11 +137,9 @@ const App: React.FC = () => {
       }
     );
 
-    // 10초 이상 응답 없으면 로딩 강제 해제
     setTimeout(() => {
       if (isConnecting) {
         setIsConnecting(false);
-        alert("방 생성 서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.");
       }
     }, 10000);
   };
@@ -146,7 +150,6 @@ const App: React.FC = () => {
     setIsConnecting(true);
     
     network.init(targetCode, false, (state) => {
-      // 상태 데이터가 들어오면 성공으로 간주
       if (state && state.roomCode) {
         setGameState(state);
         setIsConnecting(false);
@@ -154,11 +157,10 @@ const App: React.FC = () => {
       }
     });
 
-    // 입장 타임아웃
     setTimeout(() => {
       if (isConnecting && view === 'landing') {
         setIsConnecting(false);
-        alert("방에 연결할 수 없습니다. 코드를 확인하거나 교사가 방을 먼저 만들었는지 확인하세요.");
+        alert("방에 연결할 수 없습니다.");
       }
     }, 8000);
   };
@@ -174,6 +176,19 @@ const App: React.FC = () => {
     setPendingSelection(null);
   };
 
+  const startBattle = () => {
+    const players = Object.values(gameState.players);
+    if (players.length === 0) return alert("참여한 인원이 없습니다!");
+    
+    const ns = { 
+      ...gameState, 
+      isStarted: true,
+      phase: 'QUIZ' // 퀴즈부터 시작하거나 바로 전투하려면 'BATTLE'로 설정
+    };
+    setGameState(ns);
+    network.broadcastState(ns);
+  };
+
   if (view === 'landing') {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-[#020617] text-white">
@@ -181,7 +196,7 @@ const App: React.FC = () => {
           <h1 className="text-8xl font-black italic text-transparent bg-clip-text bg-gradient-to-b from-blue-300 via-white to-blue-600 drop-shadow-2xl animate-pulse">EDU ARENA</h1>
           <p className="text-blue-400 font-bold tracking-[0.5em] mt-4 uppercase">Fantasy Battle Royale</p>
         </div>
-        <div className="w-full max-w-md p-10 bg-slate-900/80 backdrop-blur-xl rounded-[3rem] border-2 border-blue-500/30 shadow-[0_0_50px_rgba(59,130,246,0.2)] space-y-8">
+        <div className="w-full max-md p-10 bg-slate-900/80 backdrop-blur-xl rounded-[3rem] border-2 border-blue-500/30 shadow-[0_0_50px_rgba(59,130,246,0.2)] space-y-8">
           <div className="space-y-4">
             <input className="w-full p-5 bg-slate-800 border border-slate-700 rounded-2xl text-white outline-none focus:ring-2 ring-blue-500 font-bold" placeholder="영웅 닉네임" value={userName} onChange={e => setUserName(e.target.value)} />
             <input className="w-full p-5 bg-slate-800 border border-slate-700 rounded-2xl text-white outline-none focus:ring-2 ring-blue-500 uppercase font-black" placeholder="방 코드" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
@@ -260,7 +275,6 @@ const App: React.FC = () => {
     );
   }
 
-  // Lobby/Game 뷰는 이전과 동일 (데이터 기반 렌더링)
   if (view === 'host_lobby') {
     const players = Object.values(gameState.players) as Player[];
     return (
@@ -272,11 +286,7 @@ const App: React.FC = () => {
           </div>
           <div className="flex flex-col items-end gap-3">
              <p className="text-slate-500 font-bold">접속 중인 영웅: {players.length}명</p>
-             <button onClick={() => {
-                const ns = { ...gameState, isStarted: true };
-                setGameState(ns);
-                network.broadcastState(ns);
-             }} className="px-16 py-8 bg-emerald-600 hover:bg-emerald-500 rounded-3xl font-black text-4xl shadow-2xl transition-all active:scale-95 animate-pulse">전투 개시</button>
+             <button onClick={startBattle} className="px-16 py-8 bg-emerald-600 hover:bg-emerald-500 rounded-3xl font-black text-4xl shadow-2xl transition-all active:scale-95 animate-pulse">전투 개시</button>
           </div>
         </header>
         <div className="flex-1 grid grid-cols-3 gap-8 overflow-y-auto custom-scrollbar">
@@ -354,67 +364,99 @@ const App: React.FC = () => {
     );
   }
 
-  // Game UI ...
-  if (view === 'game' && myPlayer) {
-    const team = gameState.teams[myPlayer.teamId];
-    if (!team) return <div className="h-screen bg-black flex items-center justify-center font-black text-4xl animate-pulse">데이터 동기화 중...</div>;
+  if (view === 'game') {
+    const isTeacher = isHost;
+    const team = myPlayer ? gameState.teams[myPlayer.teamId] : null;
     const phase = gameState.phase || 'QUIZ';
-    const currentQuiz = gameState.quizzes[gameState.currentQuizIndex] || { question: '문제가 없습니다.', options: ['대기'], answer: 0 };
+    const currentQuiz = gameState.quizzes[gameState.currentQuizIndex] || { question: '등록된 퀴즈가 없습니다.', options: ['대기'], answer: 0 };
 
     return (
       <div className="fixed inset-0 bg-[#020617] flex flex-col md:flex-row overflow-hidden select-none">
         <div className="flex-1 relative order-1 md:order-none">
-          <GameCanvas teams={gameState.teams} myTeamId={myPlayer.teamId} />
-          <div className="absolute top-8 left-8 flex gap-6 pointer-events-none">
-            <div className="bg-slate-900/90 p-8 rounded-[2.5rem] border-2 border-white/10 pointer-events-auto shadow-2xl backdrop-blur-md">
-              <div className="flex items-center gap-6">
+          <GameCanvas teams={gameState.teams} myTeamId={myPlayer?.teamId} />
+          
+          {/* 상단 상태 바 */}
+          <div className="absolute top-8 left-8 right-8 flex justify-between pointer-events-none">
+            {team && (
+              <div className="bg-slate-900/90 p-6 rounded-[2rem] border-2 border-white/10 pointer-events-auto shadow-2xl backdrop-blur-md flex items-center gap-6">
                 <div className="text-center">
                    <p className="text-xs text-blue-400 font-black uppercase mb-1">{team.name}</p>
-                   <h4 className="text-3xl font-black italic">{team.hp > 0 ? 'ACTIVE' : 'DOWN'}</h4>
+                   <h4 className="text-2xl font-black italic">{team.hp > 0 ? 'ACTIVE' : 'DOWN'}</h4>
                 </div>
-                <div className="w-48 h-4 bg-black rounded-full border border-white/10 overflow-hidden">
+                <div className="w-32 h-3 bg-black rounded-full border border-white/10 overflow-hidden">
                   <div className="h-full bg-gradient-to-r from-red-600 to-pink-600 transition-all duration-500" style={{ width: `${(team.hp/team.maxHp)*100}%` }} />
                 </div>
+                <div className="bg-amber-500 px-6 py-3 rounded-xl text-black font-black text-xl italic shadow-2xl">{team.points} P</div>
               </div>
-            </div>
-            <div className="bg-amber-500 px-10 py-6 rounded-[2.5rem] text-black font-black text-4xl italic pointer-events-auto shadow-2xl">{team.points} P</div>
+            )}
+            {isTeacher && (
+              <div className="bg-slate-900/90 p-6 rounded-[2rem] border-2 border-blue-500/50 pointer-events-auto shadow-2xl backdrop-blur-md flex items-center gap-4">
+                <span className="font-black text-blue-400 uppercase">전장 중계 모드</span>
+                <button onClick={() => {
+                  const ns = {...gameState, phase: gameState.phase === 'QUIZ' ? 'BATTLE' : 'QUIZ'};
+                  setGameState(ns);
+                  network.broadcastState(ns);
+                }} className="bg-blue-600 px-4 py-2 rounded-lg font-bold text-xs">페이즈 강제 전환</button>
+              </div>
+            )}
           </div>
-          {myPlayer.role === Role.COMBAT && phase === 'BATTLE' && !team.isDead && (
+
+          {/* 전투 조작 (학생 전투원 전용) */}
+          {myPlayer?.role === Role.COMBAT && phase === 'BATTLE' && team && !team.isDead && (
             <>
-              <div className="absolute bottom-12 left-12 scale-150 origin-bottom-left"><Joystick onMove={(dir) => network.sendAction({ type: 'MOVE', payload: { teamId: myPlayer.teamId, dir } })} /></div>
-              <div className="absolute bottom-20 right-20">
-                <button onClick={() => network.sendAction({ type: 'ATTACK', payload: { teamId: myPlayer.teamId } })} className="w-36 h-36 bg-red-600 rounded-full shadow-[0_0_60px_rgba(220,38,38,0.6)] border-8 border-white/20 active:scale-90 font-black text-6xl flex items-center justify-center">⚔️</button>
+              <div className="absolute bottom-12 left-12 scale-125 origin-bottom-left pointer-events-auto">
+                <Joystick onMove={(dir) => network.sendAction({ type: 'MOVE', payload: { teamId: myPlayer.teamId, dir } })} />
+              </div>
+              <div className="absolute bottom-12 right-12 pointer-events-auto">
+                <button onClick={() => network.sendAction({ type: 'ATTACK', payload: { teamId: myPlayer.teamId } })} className="w-28 h-28 bg-red-600 rounded-full shadow-2xl border-4 border-white/20 active:scale-90 font-black text-4xl flex items-center justify-center">⚔️</button>
               </div>
             </>
           )}
         </div>
-        <div className="w-full md:w-96 bg-slate-900/95 border-l-4 border-blue-500/20 p-10 flex flex-col gap-10 order-2 md:order-none shadow-2xl backdrop-blur-2xl">
-           <header><p className="text-sm text-blue-500 font-black tracking-widest uppercase mb-1">{myPlayer.role}</p><h3 className="text-5xl font-black italic tracking-tighter">{team.name}</h3></header>
-           <div className="flex-1 overflow-y-auto custom-scrollbar">
-             {myPlayer.role === Role.QUIZ && phase === 'QUIZ' && (
-               <div className="space-y-6">
-                 <h4 className="text-xl font-bold leading-snug">Q. {currentQuiz.question}</h4>
-                 <div className="space-y-3">
-                    {currentQuiz.options.map((opt, i) => opt && (
-                      <button key={i} onClick={() => network.sendAction({ type: 'QUIZ_ANSWER', payload: { teamId: myPlayer.teamId, correct: i === currentQuiz.answer } })} className="w-full p-5 bg-slate-800 hover:bg-blue-600 rounded-2xl text-left font-black transition-all border border-white/5">{i+1}. {opt}</button>
-                    ))}
+
+        {/* 사이드바 (학생용 역할별 인터페이스) */}
+        {!isTeacher && myPlayer && (
+          <div className="w-full md:w-80 bg-slate-900/95 border-l-2 border-white/5 p-8 flex flex-col gap-6 order-2 md:order-none shadow-2xl backdrop-blur-2xl">
+             <header>
+               <p className="text-[10px] text-blue-500 font-black tracking-widest uppercase mb-1">{myPlayer.role}</p>
+               <h3 className="text-3xl font-black italic tracking-tighter">{team?.name}</h3>
+             </header>
+             <div className="flex-1 overflow-y-auto custom-scrollbar">
+               {myPlayer.role === Role.QUIZ && phase === 'QUIZ' && (
+                 <div className="space-y-6">
+                   <div className="p-4 bg-blue-600/10 border border-blue-500/20 rounded-xl">
+                    <h4 className="text-lg font-bold leading-snug">Q. {currentQuiz.question}</h4>
+                   </div>
+                   <div className="space-y-3">
+                      {currentQuiz.options.map((opt, i) => opt && (
+                        <button key={i} onClick={() => network.sendAction({ type: 'QUIZ_ANSWER', payload: { teamId: myPlayer.teamId, correct: i === currentQuiz.answer } })} className="w-full p-4 bg-slate-800 hover:bg-blue-600 rounded-xl text-left font-black transition-all border border-white/5 text-sm">{i+1}. {opt}</button>
+                      ))}
+                   </div>
                  </div>
-               </div>
-             )}
-             {myPlayer.role === Role.SUPPORT && (
-               <div className="space-y-4">
-                 <button onClick={() => {/* Upgrade Logic */}} className="w-full p-6 bg-red-900/20 border border-red-500/20 rounded-[2rem] flex justify-between items-center hover:bg-red-600 transition-all"><span className="text-3xl">⚔️</span><div className="font-black">공격력 강화</div><span className="font-black">10P</span></button>
-                 <button onClick={() => {/* Heal Logic */}} className="w-full p-6 bg-emerald-900/20 border border-emerald-500/20 rounded-[2rem] flex justify-between items-center hover:bg-emerald-600 transition-all"><span className="text-3xl">❤️</span><div className="font-black">생명력 회복</div><span className="font-black">10P</span></button>
-               </div>
-             )}
-             {myPlayer.role === Role.COMBAT && (
-               <div className="text-center p-12 bg-white/5 rounded-[3.5rem] border border-white/5 space-y-8">
-                 <div className="text-9xl transform hover:scale-110 transition-transform">{team.classType === ClassType.WARRIOR ? '🛡️' : team.classType === ClassType.MAGE ? '🔮' : team.classType === ClassType.ARCHER ? '🏹' : '🗡️'}</div>
-                 <h4 className="text-4xl font-black italic uppercase">{team.classType}</h4>
-               </div>
-             )}
-           </div>
-        </div>
+               )}
+               {myPlayer.role === Role.SUPPORT && (
+                 <div className="space-y-3">
+                   <p className="text-[10px] font-black text-slate-500 uppercase">지원 스킬</p>
+                   <button className="w-full p-4 bg-red-900/20 border border-red-500/20 rounded-xl flex justify-between items-center hover:bg-red-600 transition-all text-sm"><span className="text-xl">⚔️</span><div className="font-black">공격력 강화</div><span className="font-bold">10P</span></button>
+                   <button className="w-full p-4 bg-emerald-900/20 border border-emerald-500/20 rounded-xl flex justify-between items-center hover:bg-emerald-600 transition-all text-sm"><span className="text-xl">❤️</span><div className="font-black">생명력 회복</div><span className="font-bold">10P</span></button>
+                 </div>
+               )}
+               {myPlayer.role === Role.COMBAT && (
+                 <div className="text-center p-8 bg-white/5 rounded-3xl border border-white/5 space-y-4">
+                   <div className="text-7xl">{team?.classType === ClassType.WARRIOR ? '🛡️' : team?.classType === ClassType.MAGE ? '🔮' : team?.classType === ClassType.ARCHER ? '🏹' : '🗡️'}</div>
+                   <h4 className="text-xl font-black italic uppercase">{team?.classType}</h4>
+                   <p className="text-[10px] text-slate-500">전장 중앙의 원을 확인하세요!</p>
+                 </div>
+               )}
+               {phase === 'BATTLE' && myPlayer.role === Role.QUIZ && (
+                 <div className="p-8 text-center bg-amber-500/10 border border-amber-500/20 rounded-2xl animate-pulse">
+                   <p className="font-black text-amber-500 uppercase">전투 진행 중!</p>
+                   <p className="text-xs text-slate-400 mt-2">전투원이 싸우는 동안 잠시 대기하세요.</p>
+                 </div>
+               )}
+             </div>
+          </div>
+        )}
       </div>
     );
   }
