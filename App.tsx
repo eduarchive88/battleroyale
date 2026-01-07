@@ -17,7 +17,7 @@ const App: React.FC = () => {
   const [quizList, setQuizList] = useState<Quiz[]>([]);
   const [newQuiz, setNewQuiz] = useState<Quiz>({ question: '', options: ['', '', '', ''], answer: 0 });
   const [pendingSelection, setPendingSelection] = useState<{ teamId: string, role: Role, classType?: ClassType } | null>(null);
-  const [showAnswer, setShowAnswer] = useState(false); // 교사 정답 가리기용
+  const [showAnswer, setShowAnswer] = useState(false);
 
   const [gameState, setGameState] = useState<GameState>({
     isStarted: false,
@@ -32,7 +32,6 @@ const App: React.FC = () => {
   const timerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 학생들의 화면을 호스트의 시작 상태에 맞춰 자동으로 전환
   useEffect(() => {
     if (!isHost && gameState.isStarted && view === 'lobby') {
       setView('game');
@@ -44,26 +43,10 @@ const App: React.FC = () => {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = window.setInterval(() => {
         setGameState(prev => {
-          const nextTimer = prev.timer - 1;
-          const newPlayers = { ...prev.players };
-          let nextPhase = prev.phase;
-          let nextQuizIdx = prev.currentQuizIndex;
-
-          if (nextTimer <= 0) {
-            nextPhase = prev.phase === 'QUIZ' ? 'BATTLE' : 'QUIZ';
-            nextQuizIdx = prev.phase === 'BATTLE' ? Math.min(prev.currentQuizIndex + 1, prev.quizzes.length - 1) : prev.currentQuizIndex;
-            Object.keys(newPlayers).forEach(k => newPlayers[k].hasSubmittedQuiz = false);
-            
-            const newTeams = { ...prev.teams };
-            (Object.values(newTeams) as Team[]).forEach(t => {
-              t.activeEffects = t.activeEffects.filter(e => e.until > Date.now());
-            });
-
-            const newState: GameState = { ...prev, timer: 30, phase: nextPhase, currentQuizIndex: nextQuizIdx, players: newPlayers, teams: newTeams };
-            network.broadcastState(newState);
-            return newState;
+          if (prev.timer <= 0) {
+            return proceedToNextPhase(prev);
           }
-          const newState = { ...prev, timer: nextTimer };
+          const newState = { ...prev, timer: prev.timer - 1 };
           network.broadcastState(newState);
           return newState;
         });
@@ -71,6 +54,22 @@ const App: React.FC = () => {
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isHost, gameState.isStarted]);
+
+  const proceedToNextPhase = (prev: GameState) => {
+    const nextPhase = prev.phase === 'QUIZ' ? 'BATTLE' : 'QUIZ';
+    const nextQuizIdx = prev.phase === 'BATTLE' ? Math.min(prev.currentQuizIndex + 1, prev.quizzes.length - 1) : prev.currentQuizIndex;
+    const newPlayers = { ...prev.players };
+    Object.keys(newPlayers).forEach(k => newPlayers[k].hasSubmittedQuiz = false);
+    
+    const newTeams = { ...prev.teams };
+    (Object.values(newTeams) as Team[]).forEach(t => {
+      t.activeEffects = t.activeEffects.filter(e => e.until > Date.now());
+    });
+
+    const newState: GameState = { ...prev, timer: 30, phase: nextPhase, currentQuizIndex: nextQuizIdx, players: newPlayers, teams: newTeams };
+    network.broadcastState(newState);
+    return newState;
+  };
 
   useEffect(() => {
     if (isHost) network.setActionListener(handleHostAction);
@@ -85,26 +84,37 @@ const App: React.FC = () => {
         case 'CONFIRM_SELECTION': {
           const { player } = payload;
           newState.players[player.id] = player;
+          
+          const classToUse = player.role === Role.COMBAT ? player.classType : ClassType.WARRIOR;
+          const base = CLASS_BASE_STATS[classToUse];
+
           if (!newState.teams[player.teamId]) {
-            const base = CLASS_BASE_STATS[player.classType];
             newState.teams[player.teamId] = {
               id: player.teamId, name: `${player.teamId} 모둠`, points: 0,
               hp: base.hp, maxHp: base.hp, mp: base.mp, maxMp: base.mp,
               x: Math.random() * 800 + 100, y: Math.random() * 800 + 100, angle: 0,
-              isDead: false, classType: player.classType, stats: { ...base },
+              isDead: false, classType: classToUse, stats: { ...base },
               items: { weapon: false, armor: false, boots: false },
               unlockedSkills: [], activeEffects: [], lastAtkTime: 0
             };
+          } else if (player.role === Role.COMBAT) {
+            // 전투요원이 들어오면 해당 팀의 클래스 정보를 즉시 갱신 (직업 불일치 해결)
+            newState.teams[player.teamId].classType = classToUse;
+            newState.teams[player.teamId].hp = base.hp;
+            newState.teams[player.teamId].maxHp = base.hp;
+            newState.teams[player.teamId].stats = { ...base };
           }
           break;
         }
         case 'CANCEL_SELECTION': {
           const { playerId, teamId } = payload;
           delete newState.players[playerId];
-          // 해당 팀에 아무도 없으면 팀 삭제
-          const remains = Object.values(newState.players).some(p => p.teamId === teamId);
+          const remains = Object.values(newState.players).some(p => (p as Player).teamId === teamId);
           if (!remains) delete newState.teams[teamId];
           break;
+        }
+        case 'SKIP_PHASE': {
+          return proceedToNextPhase(newState);
         }
         case 'ADJUST_TIMER': {
           newState.timer = Math.max(0, newState.timer + payload.amount);
@@ -425,6 +435,8 @@ const App: React.FC = () => {
     const isTeacher = isHost;
     const team = myPlayer ? gameState.teams[myPlayer.teamId] : null;
     const currentQuiz = gameState.quizzes[gameState.currentQuizIndex] || { question: "준비된 퀴즈가 없습니다.", options: ["-"], answer: 0 };
+    const prevQuiz = gameState.currentQuizIndex > 0 ? gameState.quizzes[gameState.currentQuizIndex - 1] : (gameState.phase === 'BATTLE' ? gameState.quizzes[gameState.currentQuizIndex] : null);
+    
     const phaseColor = gameState.phase === 'QUIZ' ? 'bg-[#1e1b4b]' : 'bg-[#0f172a]';
     const accentColor = gameState.phase === 'QUIZ' ? 'border-violet-500/50' : 'border-red-500/50';
 
@@ -443,8 +455,11 @@ const App: React.FC = () => {
 
            {isTeacher && (
              <div className="absolute top-10 right-10 flex flex-col gap-3">
-               <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:5}})} className="bg-emerald-600/80 hover:bg-emerald-500 px-6 py-3 rounded-2xl font-black text-sm shadow-xl">+5s</button>
-               <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:-5}})} className="bg-rose-600/80 hover:bg-rose-500 px-6 py-3 rounded-2xl font-black text-sm shadow-xl">-5s</button>
+               <div className="flex gap-2">
+                 <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:5}})} className="bg-emerald-600/80 hover:bg-emerald-500 px-6 py-3 rounded-2xl font-black text-sm shadow-xl">+5s</button>
+                 <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:-5}})} className="bg-rose-600/80 hover:bg-rose-500 px-6 py-3 rounded-2xl font-black text-sm shadow-xl">-5s</button>
+               </div>
+               <button onClick={()=>network.sendAction({type:'SKIP_PHASE', payload:{}})} className="bg-blue-600/80 hover:bg-blue-500 px-6 py-3 rounded-2xl font-black text-sm shadow-xl">다음 단계로 스킵 (Skip)</button>
              </div>
            )}
 
@@ -475,18 +490,37 @@ const App: React.FC = () => {
              <div className="space-y-6">
                 <h3 className="text-2xl font-black text-white italic border-b-2 border-white/10 pb-2">HOST DASHBOARD</h3>
                 {gameState.phase === 'QUIZ' ? (
-                  <div className="bg-black/30 p-6 rounded-[2.5rem] border border-violet-400/30">
-                    <p className="text-violet-300 font-bold text-xs uppercase mb-4 tracking-tighter">Current Quiz</p>
-                    <p className="text-xl font-black leading-tight text-white mb-6">"{currentQuiz.question}"</p>
-                    <div className="space-y-2">
-                       {currentQuiz.options.map((o, idx) => (
-                         <div key={idx} className={`p-3 rounded-xl text-xs font-bold ${idx === currentQuiz.answer && showAnswer ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' : 'bg-white/5 text-white/50'}`}>
-                           {idx + 1}. {o}
-                         </div>
-                       ))}
+                  <>
+                    <div className="bg-black/30 p-6 rounded-[2.5rem] border border-violet-400/30">
+                      <p className="text-violet-300 font-bold text-xs uppercase mb-4 tracking-tighter">Current Quiz</p>
+                      <p className="text-xl font-black leading-tight text-white mb-6">"{currentQuiz.question}"</p>
+                      <div className="space-y-2">
+                         {currentQuiz.options.map((o, idx) => (
+                           <div key={idx} className={`p-3 rounded-xl text-xs font-bold ${idx === currentQuiz.answer && showAnswer ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' : 'bg-white/5 text-white/50'}`}>
+                             {idx + 1}. {o}
+                           </div>
+                         ))}
+                      </div>
+                      <button onClick={() => setShowAnswer(!showAnswer)} className="mt-4 w-full py-2 bg-white/10 rounded-xl text-xs font-black">{showAnswer ? '정답 숨기기' : '정답 보기'}</button>
                     </div>
-                    <button onClick={() => setShowAnswer(!showAnswer)} className="mt-4 w-full py-2 bg-white/10 rounded-xl text-xs font-black">{showAnswer ? '정답 숨기기' : '정답 보기'}</button>
-                  </div>
+                    <div className="bg-black/20 p-6 rounded-3xl border border-white/5">
+                      <p className="text-[10px] font-black text-slate-500 uppercase mb-4 tracking-widest">제출 현황 (Submission)</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[1,2,3,4,5,6,7,8,9].map(tId => {
+                          // Fix: Add explicit type casting for p to Player to resolve unknown property errors
+                          const quizPlayer = Object.values(gameState.players).find(p => (p as Player).teamId === tId.toString() && (p as Player).role === Role.QUIZ) as Player | undefined;
+                          const submitted = quizPlayer?.hasSubmittedQuiz;
+                          const active = !!Object.values(gameState.players).find(p => (p as Player).teamId === tId.toString());
+                          if (!active) return null;
+                          return (
+                            <div key={tId} className={`p-2 rounded-lg text-center font-black text-[10px] border ${submitted ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-white/5 text-slate-500'}`}>
+                              {tId}팀 {submitted ? '제출' : '대기'}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
                 ) : (
                   <div className="space-y-4">
                     <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Team Live Stats</p>
@@ -518,7 +552,7 @@ const App: React.FC = () => {
                       gameState.players[myPlayer.id].hasSubmittedQuiz ? (
                         <div className="p-10 bg-black/30 rounded-[3rem] border border-white/5 text-center animate-pulse">
                           <p className="text-4xl mb-4">✅</p>
-                          <p className="font-bold text-sm text-slate-400">답안 제출 완료!<br/>다음 라운드를 대기하세요.</p>
+                          <p className="font-bold text-sm text-slate-400">답안 제출 완료!<br/>전장에 마력이 공급됩니다.</p>
                         </div>
                       ) : (
                         <div className="space-y-4">
@@ -531,9 +565,16 @@ const App: React.FC = () => {
                         </div>
                       )
                     ) : (
-                      <div className="p-8 bg-black/40 rounded-[2.5rem] border border-white/5 text-center">
-                        <p className="text-5xl mb-4">🛡️</p>
-                        <p className="font-black text-sm text-slate-500">전투 단계입니다.</p>
+                      <div className="p-8 bg-black/40 rounded-[2.5rem] border border-white/5">
+                        <p className="text-xs font-black text-slate-500 uppercase mb-4">정답 리뷰 (Last Answer)</p>
+                        {prevQuiz ? (
+                          <div className="space-y-2">
+                            <p className="font-bold text-sm text-white">Q. {prevQuiz.question}</p>
+                            <div className="p-3 bg-emerald-600/20 border border-emerald-500/50 rounded-xl">
+                              <p className="text-xs font-black text-emerald-400">정답: {prevQuiz.options[prevQuiz.answer]}</p>
+                            </div>
+                          </div>
+                        ) : <p className="text-xs text-slate-500">이전 문제가 없습니다.</p>}
                       </div>
                     )}
                   </div>
@@ -574,8 +615,21 @@ const App: React.FC = () => {
                          </section>
                       </div>
                     ) : (
-                      <div className="p-8 bg-black/30 rounded-[3rem] border border-white/5 text-center">
-                        <p className="font-bold text-sm text-slate-500">준비 단계입니다.</p>
+                      <div className="space-y-4">
+                        <div className="p-8 bg-black/30 rounded-[3rem] border border-white/5 text-center">
+                          <p className="font-bold text-sm text-slate-500">준비 단계입니다.</p>
+                        </div>
+                        <div className="p-6 bg-black/40 rounded-[2.5rem] border border-white/5">
+                          <p className="text-xs font-black text-slate-500 uppercase mb-4">정답 리뷰</p>
+                          {prevQuiz ? (
+                            <div className="space-y-2">
+                              <p className="font-bold text-sm text-white">Q. {prevQuiz.question}</p>
+                              <div className="p-3 bg-emerald-600/20 border border-emerald-500/50 rounded-xl">
+                                <p className="text-xs font-black text-emerald-400">정답: {prevQuiz.options[prevQuiz.answer]}</p>
+                              </div>
+                            </div>
+                          ) : <p className="text-xs text-slate-500">이전 문제가 없습니다.</p>}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -588,6 +642,19 @@ const App: React.FC = () => {
                        <div className="text-9xl mb-4 animate-bounce">{team?.classType === ClassType.WARRIOR ? '🛡️' : team?.classType === ClassType.MAGE ? '🔮' : team?.classType === ClassType.ARCHER ? '🏹' : '🗡️'}</div>
                        <p className="font-black uppercase tracking-[0.5em] text-blue-400 text-xl">{team?.classType}</p>
                     </div>
+                    {gameState.phase === 'QUIZ' && (
+                      <div className="p-6 bg-black/40 rounded-[2.5rem] border border-white/5">
+                        <p className="text-xs font-black text-slate-500 uppercase mb-4">정답 리뷰</p>
+                        {prevQuiz ? (
+                          <div className="space-y-2">
+                            <p className="font-bold text-sm text-white">Q. {prevQuiz.question}</p>
+                            <div className="p-3 bg-emerald-600/20 border border-emerald-500/50 rounded-xl">
+                              <p className="text-xs font-black text-emerald-400">정답: {prevQuiz.options[prevQuiz.answer]}</p>
+                            </div>
+                          </div>
+                        ) : <p className="text-xs text-slate-500">이전 문제가 없습니다.</p>}
+                      </div>
+                    )}
                   </div>
                 )}
              </div>
