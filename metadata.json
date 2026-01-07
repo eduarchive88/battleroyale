@@ -1,0 +1,7 @@
+{
+  "name": "Battle Royale Classroom Game",
+  "description": "A real-time, team-based classroom competition game featuring quiz solving, character support, and battle royale combat.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
