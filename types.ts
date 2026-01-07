@@ -37,8 +37,9 @@ export interface Team {
   items: { weapon: boolean; armor: boolean; boots: boolean };
   unlockedSkills: string[];
   activeEffects: { type: string; until: number }[];
-  skillCooldowns: Record<string, number>; // 추가: 스킬별 쿨타임 만료 시간
+  skillCooldowns: Record<string, number>;
   lastAtkTime: number;
+  totalDamageDealt?: number; // 추가: 점수 합산용
 }
 
 export interface Quiz {
@@ -54,8 +55,9 @@ export interface GameState {
   quizzes: Quiz[];
   roomCode?: string;
   currentQuizIndex: number;
-  phase: 'QUIZ' | 'BATTLE';
+  phase: 'QUIZ' | 'BATTLE' | 'GAME_OVER'; // GAME_OVER 단계 추가
   timer: number;
+  winnerTeamId?: string; // 추가: 최종 우승팀
 }
 
 export interface Player {
