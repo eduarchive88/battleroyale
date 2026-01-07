@@ -12,41 +12,37 @@ export enum ClassType {
   ROGUE = 'ROGUE'
 }
 
-export interface Player {
-  id: string;
-  name: string;
-  teamId: string;
-  role: Role;
-  classType: ClassType;
-  points: number;
+export interface CharacterStats {
+  atk: number;
+  def: number;
+  range: number;
+  speed: number;
+  atkSpeed: number;
 }
 
 export interface Team {
   id: string;
   name: string;
   points: number;
-  stats: CharacterStats;
   hp: number;
   maxHp: number;
+  mp: number;
+  maxMp: number;
   x: number;
   y: number;
   isDead: boolean;
   classType: ClassType;
-}
-
-export interface CharacterStats {
-  str: number;
-  int: number;
-  dex: number;
-  atk: number;
-  def: number;
-  range: number;
+  stats: CharacterStats;
+  items: { weapon: boolean; armor: boolean; boots: boolean };
+  unlockedSkills: string[];
+  activeEffects: { type: string; until: number }[];
+  lastAtkTime: number;
 }
 
 export interface Quiz {
   question: string;
   options: string[];
-  answer: number; // 0-3
+  answer: number;
 }
 
 export interface GameState {
@@ -57,4 +53,14 @@ export interface GameState {
   roomCode?: string;
   currentQuizIndex: number;
   phase: 'QUIZ' | 'BATTLE';
+  timer: number;
+}
+
+export interface Player {
+  id: string;
+  name: string;
+  teamId: string;
+  role: Role;
+  classType: ClassType;
+  points: number;
 }
