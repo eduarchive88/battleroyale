@@ -54,4 +54,5 @@ export interface GameState {
   teams: Record<string, Team>;
   players: Record<string, Player>;
   quizzes: Quiz[];
+  roomCode?: string;
 }
