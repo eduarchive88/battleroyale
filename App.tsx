@@ -317,64 +317,64 @@ const App: React.FC = () => {
 
   if (view === 'host_setup') {
     return (
-      <div className="flex flex-col h-screen bg-[#0a0a0a] text-amber-100 p-10 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
-        <div className="flex justify-between items-center mb-10 border-b-4 border-amber-900 pb-6">
-          <h2 className="text-5xl font-black text-amber-600 italic tracking-tighter">전장 설계자 성소</h2>
-          <button onClick={() => setView('landing')} className="text-amber-800 hover:text-amber-400 font-bold text-sm tracking-widest uppercase underline">봉인 해제 (뒤로)</button>
+      <div className="flex flex-col h-screen bg-[#0a0a0a] text-amber-100 p-4 md:p-10 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
+        <div className="flex justify-between items-center mb-4 md:mb-6 border-b-4 border-amber-900 pb-2 md:pb-4">
+          <h2 className="text-3xl md:text-5xl font-black text-amber-600 italic tracking-tighter">전장 설계자 성소</h2>
+          <button onClick={() => setView('landing')} className="text-amber-800 hover:text-amber-400 font-bold text-xs md:text-sm tracking-widest uppercase underline">봉인 해제 (뒤로)</button>
         </div>
         
-        <div className="grid grid-cols-2 gap-10 flex-1 overflow-hidden">
-          <div className="bg-slate-900 p-8 border-double border-8 border-amber-900 flex flex-col gap-6 shadow-2xl">
-            <h3 className="text-2xl font-black text-amber-500 border-b border-amber-900/50 pb-2 flex items-center gap-2"><span>✍️</span> 고대 퀴즈 기록</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-10 flex-1 overflow-hidden min-h-0">
+          <div className="bg-slate-900 p-4 md:p-8 border-double border-4 md:border-8 border-amber-900 flex flex-col gap-4 md:gap-6 shadow-2xl overflow-y-auto custom-scrollbar">
+            <h3 className="text-xl md:text-2xl font-black text-amber-500 border-b border-amber-900/50 pb-2 flex items-center gap-2 sticky top-0 bg-slate-900 z-10"><span>✍️</span> 고대 퀴즈 기록</h3>
             <div className="space-y-4">
-              <input className="w-full p-4 bg-black border border-amber-900 text-amber-200 font-bold outline-none focus:border-amber-500" placeholder="성전의 질문을 입력하십시오" value={newQuiz.question} onChange={e => setNewQuiz({...newQuiz, question: e.target.value})} />
-              <div className="grid grid-cols-1 gap-4 bg-black/40 p-5 border border-amber-900/30">
+              <input className="w-full p-3 md:p-4 bg-black border border-amber-900 text-amber-200 font-bold outline-none focus:border-amber-500" placeholder="성전의 질문을 입력하십시오" value={newQuiz.question} onChange={e => setNewQuiz({...newQuiz, question: e.target.value})} />
+              <div className="grid grid-cols-1 gap-3 md:gap-4 bg-black/40 p-4 md:p-5 border border-amber-900/30">
                 <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest">선택지와 정답 체크</p>
                 {newQuiz.options.map((o, i) => (
-                  <div key={i} className="flex gap-4 items-center group">
-                    <input type="radio" name="correctAnswer" checked={newQuiz.answer === i} onChange={() => setNewQuiz({...newQuiz, answer: i})} className="w-6 h-6 accent-amber-500 cursor-pointer" title="정답으로 설정" />
-                    <input className={`flex-1 p-3 bg-black border ${newQuiz.answer === i ? 'border-amber-500' : 'border-amber-900'} text-xs text-amber-200 outline-none transition-colors`} placeholder={`선택지 ${i+1}`} value={o} onChange={e => { const opts = [...newQuiz.options]; opts[i] = e.target.value; setNewQuiz({...newQuiz, options: opts}); }} />
+                  <div key={i} className="flex gap-3 md:gap-4 items-center group">
+                    <input type="radio" name="correctAnswer" checked={newQuiz.answer === i} onChange={() => setNewQuiz({...newQuiz, answer: i})} className="w-5 h-5 md:w-6 md:h-6 accent-amber-500 cursor-pointer" title="정답으로 설정" />
+                    <input className={`flex-1 p-2 md:p-3 bg-black border ${newQuiz.answer === i ? 'border-amber-500' : 'border-amber-900'} text-[10px] md:text-xs text-amber-200 outline-none transition-colors`} placeholder={`선택지 ${i+1}`} value={o} onChange={e => { const opts = [...newQuiz.options]; opts[i] = e.target.value; setNewQuiz({...newQuiz, options: opts}); }} />
                   </div>
                 ))}
               </div>
             </div>
-            <button onClick={() => { if(newQuiz.question) { setQuizList([...quizList, newQuiz]); setNewQuiz({question:'', options:['','','',''], answer:0}); } }} className="w-full py-5 bg-amber-800 font-black border-4 border-amber-600 text-white shadow-lg active:scale-95 hover:bg-amber-700">지혜의 서에 봉인</button>
-            <div className="grid grid-cols-2 gap-4 mt-2">
-              <button onClick={downloadCSVTemplate} className="py-3 bg-slate-950 text-[10px] font-black border border-amber-900 hover:bg-amber-900/20 text-amber-600 uppercase tracking-widest">양식 문서 하사</button>
-              <button onClick={() => fileInputRef.current?.click()} className="py-3 bg-slate-950 text-[10px] font-black border border-amber-900 hover:bg-amber-900/20 text-amber-600 uppercase tracking-widest">외부 문서 봉인</button>
+            <button onClick={() => { if(newQuiz.question) { setQuizList([...quizList, newQuiz]); setNewQuiz({question:'', options:['','','',''], answer:0}); } }} className="w-full py-4 md:py-5 bg-amber-800 font-black border-4 border-amber-600 text-white shadow-lg active:scale-95 hover:bg-amber-700">지혜의 서에 봉인</button>
+            <div className="grid grid-cols-2 gap-3 md:gap-4 mt-2">
+              <button onClick={downloadCSVTemplate} className="py-2 md:py-3 bg-slate-950 text-[10px] font-black border border-amber-900 hover:bg-amber-900/20 text-amber-600 uppercase tracking-widest">양식 문서 하사</button>
+              <button onClick={() => fileInputRef.current?.click()} className="py-2 md:py-3 bg-slate-950 text-[10px] font-black border border-amber-900 hover:bg-amber-900/20 text-amber-600 uppercase tracking-widest">외부 문서 봉인</button>
               <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleCSVUpload} />
             </div>
           </div>
           
-          <div className="bg-slate-950 p-10 border-double border-8 border-amber-950 overflow-y-auto custom-scrollbar shadow-inner relative">
-            <h3 className="text-2xl font-black mb-6 border-b-2 border-amber-900 pb-2 text-amber-700 sticky top-0 bg-slate-950 z-10 uppercase tracking-tighter">봉인된 지혜의 목록 ({quizList.length})</h3>
+          <div className="bg-slate-950 p-4 md:p-10 border-double border-4 md:border-8 border-amber-950 overflow-y-auto custom-scrollbar shadow-inner relative hidden lg:block">
+            <h3 className="text-xl md:text-2xl font-black mb-6 border-b-2 border-amber-900 pb-2 text-amber-700 sticky top-0 bg-slate-950 z-10 uppercase tracking-tighter">봉인된 지혜의 목록 ({quizList.length})</h3>
             <div className="space-y-4">
               {quizList.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full opacity-20 py-20">
-                  <span className="text-9xl mb-4">📜</span>
+                  <span className="text-8xl md:text-9xl mb-4">📜</span>
                   <p className="font-black italic">아직 기록된 지혜가 없습니다...</p>
                 </div>
               ) : quizList.map((q, i) => (
-                <div key={i} className="p-5 bg-black border-l-8 border-amber-800 mb-4 flex justify-between items-start group hover:border-amber-500 transition-all">
+                <div key={i} className="p-4 md:p-5 bg-black border-l-8 border-amber-800 mb-4 flex justify-between items-start group hover:border-amber-500 transition-all">
                   <div className="text-sm">
-                    <span className="text-amber-900 mr-3 font-mono text-xl font-black">#{i+1}</span>
+                    <span className="text-amber-900 mr-3 font-mono text-lg md:text-xl font-black">#{i+1}</span>
                     <span className="font-bold text-amber-100">{q.question}</span>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {q.options.map((opt, idx) => (
-                        <span key={idx} className={`text-[9px] px-2 py-0.5 border ${idx === q.answer ? 'bg-amber-900/40 border-amber-500 text-amber-200' : 'border-amber-900/30 text-amber-800'}`}>{opt}</span>
+                        <span key={idx} className={`text-[8px] md:text-[9px] px-2 py-0.5 border ${idx === q.answer ? 'bg-amber-900/40 border-amber-500 text-amber-200' : 'border-amber-900/30 text-amber-800'}`}>{opt}</span>
                       ))}
                     </div>
                   </div>
-                  <button onClick={() => setQuizList(quizList.filter((_, idx) => idx !== i))} className="text-red-900 hover:text-red-500 font-black text-xs uppercase tracking-tighter">소멸</button>
+                  <button onClick={() => setQuizList(quizList.filter((_, idx) => idx !== i))} className="text-red-900 hover:text-red-500 font-black text-xs uppercase tracking-tighter ml-2">소멸</button>
                 </div>
               ))}
             </div>
           </div>
         </div>
         
-        <div className="mt-10 flex gap-6">
-          <input className="flex-1 p-6 bg-slate-900 border-double border-8 border-amber-900 rounded-none text-4xl font-black uppercase text-center text-amber-200 focus:ring-4 ring-amber-600 outline-none" placeholder="새로운 성지의 함자" value={customCode} onChange={e => setCustomCode(e.target.value)} />
-          <button onClick={createRoom} className="px-24 bg-amber-800 border-4 border-amber-400 font-black text-3xl text-white shadow-2xl hover:bg-amber-700 active:scale-95 transition-all">전장의 문 개방</button>
+        <div className="mt-6 md:mt-10 flex flex-col md:flex-row gap-4 md:gap-6 pb-2">
+          <input className="flex-1 p-4 md:p-6 bg-slate-900 border-double border-4 md:border-8 border-amber-900 rounded-none text-2xl md:text-4xl font-black uppercase text-center text-amber-200 focus:ring-4 ring-amber-600 outline-none" placeholder="새로운 성지의 함자" value={customCode} onChange={e => setCustomCode(e.target.value)} />
+          <button onClick={createRoom} className="px-12 md:px-24 py-4 md:py-0 bg-amber-800 border-4 border-amber-400 font-black text-xl md:text-3xl text-white shadow-2xl hover:bg-amber-700 active:scale-95 transition-all">전장의 문 개방</button>
         </div>
       </div>
     );
