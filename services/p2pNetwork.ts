@@ -17,18 +17,32 @@ class P2PNetwork {
   private isHost: boolean = false;
   private onStateChange: ((state: GameState) => void) | null = null;
   private gameState: GameState | null = null;
+  private triggerAction: any = null;
 
   init(roomCode: string, isHost: boolean, onStateChange: (state: GameState) => void) {
     this.isHost = isHost;
     this.onStateChange = onStateChange;
     const peerId = `edu-arena-${roomCode}`;
 
-    this.peer = new Peer(isHost ? peerId : undefined);
+    if (this.peer) {
+      this.peer.destroy();
+    }
+
+    this.peer = new Peer(isHost ? peerId : undefined, {
+      debug: 2
+    });
 
     this.peer.on('open', (id: string) => {
       console.log('Peer connected with ID:', id);
       if (!isHost) {
         this.connectToHost(peerId);
+      }
+    });
+
+    this.peer.on('error', (err: any) => {
+      console.error('Peer error:', err.type, err);
+      if (err.type === 'unavailable-id' && isHost) {
+        alert("이미 사용 중인 방 코드입니다. 다른 코드를 사용하세요.");
       }
     });
 
@@ -48,6 +62,11 @@ class P2PNetwork {
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
       console.log('Connection established with:', conn.peer);
+      
+      // If student connects, send current state immediately (if Host)
+      if (this.isHost && this.gameState) {
+        this.broadcastState(this.gameState);
+      }
     });
 
     conn.on('data', (data: P2PMessage) => {
@@ -55,21 +74,22 @@ class P2PNetwork {
     });
 
     conn.on('close', () => {
+      console.log('Connection closed:', conn.peer);
+      delete this.connections[conn.peer];
+    });
+
+    conn.on('error', (err: any) => {
+      console.error('Connection error:', err);
       delete this.connections[conn.peer];
     });
   }
 
   private handleMessage(msg: P2PMessage, conn: any) {
     if (this.isHost) {
-      if (msg.type === 'PLAYER_JOIN') {
-        // 교사는 새 플레이어 정보를 받고 상태 업데이트 후 전파
-        if (this.onStateChange && this.gameState) {
-            // 호스트 로직에서 처리하도록 이벤트만 발생시키거나 직접 처리
-        }
-      }
       if (msg.type === 'PLAYER_ACTION') {
-          // 호스트는 플레이어의 액션을 받아 GameState 반영 (Authority)
+        if (this.triggerAction) {
           this.triggerAction(msg.payload);
+        }
       }
     } else {
       if (msg.type === 'STATE_UPDATE') {
@@ -79,25 +99,28 @@ class P2PNetwork {
     }
   }
 
-  // 호스트가 전체 학생에게 상태 전송
   broadcastState(state: GameState) {
     this.gameState = state;
     const msg: P2PMessage = { type: 'STATE_UPDATE', payload: state };
     Object.values(this.connections).forEach((conn: any) => {
-      if (conn.open) conn.send(msg);
+      if (conn.open) {
+        conn.send(msg);
+      }
     });
   }
 
-  // 학생이 호스트에게 액션 전송
   sendAction(action: any) {
     const msg: P2PMessage = { type: 'PLAYER_ACTION', payload: action };
     Object.values(this.connections).forEach((conn: any) => {
-      if (conn.open) conn.send(msg);
+      if (conn.open) {
+        conn.send(msg);
+      }
     });
   }
 
-  private triggerAction: any = null;
-  setActionListener(fn: any) { this.triggerAction = fn; }
+  setActionListener(fn: any) { 
+    this.triggerAction = fn; 
+  }
 }
 
 export const network = new P2PNetwork();

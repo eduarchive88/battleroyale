@@ -74,7 +74,6 @@ const App: React.FC = () => {
         const { teamId } = action.payload;
         const attacker = newState.teams[teamId];
         if (!attacker || attacker.isDead) return;
-        // Fix: Explicitly type target as Team to resolve property access errors on type 'unknown'
         (Object.values(newState.teams) as Team[]).forEach((target) => {
           if (target.id === teamId || target.isDead) return;
           const d = Math.sqrt(Math.pow(target.x - attacker.x, 2) + Math.pow(target.y - attacker.y, 2));
@@ -90,7 +89,6 @@ const App: React.FC = () => {
         const { teamId, correct } = action.payload;
         if (newState.teams[teamId]) {
           newState.teams[teamId].points += correct ? 10 : 2;
-          // 모든 팀이 풀었거나 특정 조건 시 페이즈 전환 가능
           newState.phase = 'BATTLE'; 
         }
         break;
@@ -99,6 +97,20 @@ const App: React.FC = () => {
 
     setGameState(newState);
     network.broadcastState(newState);
+  };
+
+  const downloadCSVTemplate = () => {
+    const headers = "문제,보기1,보기2,보기3,보기4,정답(1-4)\n";
+    const sample = "사과는 영어로 무엇일까요?,Apple,Banana,Orange,Grape,1\n";
+    const blob = new Blob(["\ufeff" + headers + sample], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", "edu_arena_quiz_template.csv");
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -111,11 +123,11 @@ const App: React.FC = () => {
       const loadedQuizzes: Quiz[] = lines.filter(l => l.trim()).map(line => {
         const parts = line.split(',');
         return {
-          question: parts[0]?.trim(),
-          options: [parts[1], parts[2], parts[3], parts[4]].map(o => o?.trim()),
+          question: parts[0]?.trim() || "",
+          options: [parts[1], parts[2], parts[3], parts[4]].map(o => o?.trim() || ""),
           answer: (parseInt(parts[5]) - 1) || 0
         };
-      });
+      }).filter(q => q.question !== "");
       setQuizList([...quizList, ...loadedQuizzes]);
     };
     reader.readAsText(file);
@@ -125,6 +137,7 @@ const App: React.FC = () => {
     const finalCode = customCode.trim().toUpperCase() || Math.random().toString(36).substring(2, 7).toUpperCase();
     setRoomCode(finalCode);
     setIsHost(true);
+    
     const initialState: GameState = { 
       roomCode: finalCode, 
       isStarted: false, 
@@ -134,6 +147,7 @@ const App: React.FC = () => {
       currentQuizIndex: 0,
       phase: 'QUIZ'
     };
+    
     setGameState(initialState);
     network.init(finalCode, true, (state) => setGameState(state));
     setView('host_lobby');
@@ -206,6 +220,7 @@ const App: React.FC = () => {
               <h3 className="text-xl font-black">2. CSV 업로드</h3>
               <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileUpload} />
               <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded-2xl font-bold">파일 선택</button>
+              <button onClick={downloadCSVTemplate} className="w-full text-xs text-emerald-500/70 hover:text-emerald-500 underline decoration-dotted">샘플 양식 다운로드(.csv)</button>
             </div>
           </div>
           <div className="col-span-7 space-y-8">
