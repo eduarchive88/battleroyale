@@ -37,12 +37,23 @@ const App: React.FC = () => {
       timerRef.current = window.setInterval(() => {
         setGameState(prev => {
           const nextTimer = prev.timer - 1;
+          const newPlayers = { ...prev.players };
+          let nextPhase = prev.phase;
+          let nextQuizIdx = prev.currentQuizIndex;
+
           if (nextTimer <= 0) {
-            const nextPhase = prev.phase === 'QUIZ' ? 'BATTLE' : 'QUIZ';
-            const nextQuizIdx = prev.phase === 'BATTLE' ? Math.min(prev.currentQuizIndex + 1, prev.quizzes.length - 1) : prev.currentQuizIndex;
-            const newPlayers = { ...prev.players };
+            nextPhase = prev.phase === 'QUIZ' ? 'BATTLE' : 'QUIZ';
+            nextQuizIdx = prev.phase === 'BATTLE' ? Math.min(prev.currentQuizIndex + 1, prev.quizzes.length - 1) : prev.currentQuizIndex;
             Object.keys(newPlayers).forEach(k => newPlayers[k].hasSubmittedQuiz = false);
-            const newState: GameState = { ...prev, timer: 30, phase: nextPhase, currentQuizIndex: nextQuizIdx, players: newPlayers };
+            
+            // 버프 시간 만료 체크
+            const newTeams = { ...prev.teams };
+            // FIX: Cast Object.values to Team[] to fix property access errors on line 52
+            (Object.values(newTeams) as Team[]).forEach(t => {
+              t.activeEffects = t.activeEffects.filter(e => e.until > Date.now());
+            });
+
+            const newState: GameState = { ...prev, timer: 30, phase: nextPhase, currentQuizIndex: nextQuizIdx, players: newPlayers, teams: newTeams };
             network.broadcastState(newState);
             return newState;
           }
@@ -104,7 +115,6 @@ const App: React.FC = () => {
             const speedMult = t.activeEffects.some(e => e.type === 'w_speed') ? 1.8 : 1;
             t.x = Math.max(0, Math.min(1000, t.x + payload.dir.x * t.stats.speed * 4 * speedMult));
             t.y = Math.max(0, Math.min(1000, t.y + payload.dir.y * t.stats.speed * 4 * speedMult));
-            // 방향에 따른 각도 계산 (라디안 -> 도)
             if (payload.dir.x !== 0 || payload.dir.y !== 0) {
               t.angle = Math.atan2(payload.dir.y, payload.dir.x) * (180 / Math.PI);
             }
@@ -117,31 +127,16 @@ const App: React.FC = () => {
             t.lastAtkTime = Date.now();
             const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 2.5 : 1;
             const atkMult = t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1;
-            
-            Object.values(newState.teams).forEach((target: Team) => {
+            Object.values(newState.teams).forEach((target: any) => {
               if (target.id === t.id || target.isDead) return;
-              const dx = target.x - t.x;
-              const dy = target.y - t.y;
+              const dx = target.x - t.x; const dy = target.y - t.y;
               const dist = Math.sqrt(dx * dx + dy * dy);
-              const maxRange = t.stats.range * rangeMult;
-              
-              if (dist < maxRange) {
-                // 각도 기반 타격 판정 (전사/도적 같은 근접은 각도가 중요)
-                const targetAngle = Math.atan2(dy, dx) * (180 / Math.PI);
-                let angleDiff = Math.abs(t.angle - targetAngle);
-                if (angleDiff > 180) angleDiff = 360 - angleDiff;
-
-                let canHit = true;
-                // 전사는 전방 90도 범위만 타격
-                if (t.classType === ClassType.WARRIOR && angleDiff > 45) canHit = false;
-                
-                if (canHit) {
-                  if (target.activeEffects.some((e: any) => e.type === 'w_invinc')) return;
-                  const damage = Math.max(5, (t.stats.atk * atkMult) - target.stats.def);
-                  target.hp = Math.max(0, target.hp - damage);
-                  if (target.hp <= 0) target.isDead = true;
-                  t.points += 2;
-                }
+              if (dist < (t.stats.range * rangeMult)) {
+                if (target.activeEffects.some((e: any) => e.type === 'w_invinc')) return;
+                const damage = Math.max(5, (t.stats.atk * atkMult) - target.stats.def);
+                target.hp = Math.max(0, target.hp - damage);
+                if (target.hp <= 0) target.isDead = true;
+                t.points += 2;
               }
             });
           }
@@ -170,13 +165,17 @@ const App: React.FC = () => {
           const t = newState.teams[payload.teamId];
           const skill = SKILLS_INFO[t.classType].find(s => s.id === payload.skId);
           if (t && skill && t.mp >= skill.mp && !t.isDead) {
+            // 이미 해당 효과가 활성 중이면 리턴
+            if (t.activeEffects.some(e => e.type === skill.id)) return newState;
+            
             t.mp -= skill.mp;
-            t.activeEffects.push({ type: skill.id, until: Date.now() + 2500 });
+            t.activeEffects.push({ type: skill.id, until: Date.now() + 3000 }); // 3초 지속
+            
             if (skill.id === 'r_tele') {
               const others = Object.values(newState.teams).filter(ot => ot.id !== t.id && !ot.isDead);
               if (others.length > 0) {
                 const target = others[Math.floor(Math.random() * others.length)];
-                t.x = target.x - 40; t.y = target.y - 40;
+                t.x = target.x - 50; t.y = target.y - 50;
               }
             }
           }
@@ -205,6 +204,14 @@ const App: React.FC = () => {
       network.broadcastState(initialState);
       setView('host_lobby');
     });
+  };
+
+  const startBattle = () => {
+    const ns = { ...gameState, isStarted: true };
+    setGameState(ns);
+    network.broadcastState(ns);
+    // 호스트 뷰도 게임 뷰로 전환
+    setView('game');
   };
 
   if (view === 'landing') {
@@ -303,11 +310,7 @@ const App: React.FC = () => {
             <p className="text-blue-500 font-black text-xs tracking-widest uppercase mb-1">Room Code</p>
             <h2 className="text-7xl font-mono font-black">{gameState.roomCode}</h2>
           </div>
-          <button onClick={() => {
-            const ns = { ...gameState, isStarted: true };
-            setGameState(ns);
-            network.broadcastState(ns);
-          }} className="px-16 py-8 bg-emerald-600 hover:bg-emerald-500 rounded-3xl font-black text-4xl animate-pulse transition-all">전투 개시</button>
+          <button onClick={startBattle} className="px-16 py-8 bg-emerald-600 hover:bg-emerald-500 rounded-3xl font-black text-4xl animate-pulse transition-all">전투 개시</button>
         </header>
         <div className="flex-1 grid grid-cols-3 gap-8 overflow-y-auto custom-scrollbar">
           {[1,2,3,4,5,6,7,8,9].map(tId => {
@@ -317,9 +320,12 @@ const App: React.FC = () => {
                 <h3 className="text-2xl font-black italic border-b border-white/10 pb-2 mb-4">{tId} 모둠</h3>
                 <div className="space-y-2 text-sm text-slate-400">
                   {teamPlayers.length === 0 ? '영웅 대기 중...' : teamPlayers.map(p => (
-                    <div key={p.id} className="flex justify-between bg-white/5 p-2 rounded-lg">
-                      <span>{p.name}</span>
-                      <span className="text-blue-400 font-bold text-xs">{p.role}</span>
+                    <div key={p.id} className="flex justify-between items-center bg-white/5 p-3 rounded-xl border border-white/5">
+                      <span className="font-bold text-white">{p.name}</span>
+                      <div className="flex flex-col items-end">
+                        <span className="text-blue-400 font-black text-[10px] uppercase">{p.role}</span>
+                        {p.role === Role.COMBAT && <span className="text-emerald-400 font-black text-[10px] uppercase">클래스: {p.classType}</span>}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -349,10 +355,10 @@ const App: React.FC = () => {
                 <div key={tId} className={`p-8 rounded-[3.5rem] border-2 transition-all ${isMyTeam ? 'bg-blue-600/20 border-blue-500 shadow-2xl' : 'bg-slate-900 border-white/5'}`}>
                   <h3 className="text-3xl font-black mb-6 italic">{tId} Team</h3>
                   <div className="space-y-3">
-                    <button disabled={quizTaken || !!myPlayer} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.QUIZ })} className={`w-full p-4 rounded-2xl text-left font-black flex justify-between transition-all ${pendingSelection?.teamId === tId.toString() && pendingSelection?.role === Role.QUIZ ? 'ring-4 ring-white bg-blue-600' : 'bg-slate-800'}`}>
+                    <button disabled={quizTaken || !!myPlayer} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.QUIZ })} className={`w-full p-4 rounded-2xl text-left font-black flex justify-between transition-all ${pendingSelection?.teamId === tId.toString() && pendingSelection?.role === Role.QUIZ ? 'ring-4 ring-white bg-blue-600' : 'bg-slate-800 disabled:opacity-30'}`}>
                       <span>🧠 문제풀이</span><span className="text-xs">{quizTaken ? '점유됨' : '선택'}</span>
                     </button>
-                    <button disabled={supporters >= 2 || !!myPlayer} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.SUPPORT })} className={`w-full p-4 rounded-2xl text-left font-black flex justify-between transition-all ${pendingSelection?.teamId === tId.toString() && pendingSelection?.role === Role.SUPPORT ? 'ring-4 ring-white bg-emerald-600' : 'bg-slate-800'}`}>
+                    <button disabled={supporters >= 2 || !!myPlayer} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.SUPPORT })} className={`w-full p-4 rounded-2xl text-left font-black flex justify-between transition-all ${pendingSelection?.teamId === tId.toString() && pendingSelection?.role === Role.SUPPORT ? 'ring-4 ring-white bg-emerald-600' : 'bg-slate-800 disabled:opacity-30'}`}>
                       <span>🛡️ 서포터 ({supporters}/2)</span><span className="text-xs">{supporters >= 2 ? '점유됨' : '선택'}</span>
                     </button>
                     <div className="pt-4 border-t border-white/10 mt-2">
@@ -361,7 +367,7 @@ const App: React.FC = () => {
                           {[ClassType.WARRIOR, ClassType.MAGE, ClassType.ARCHER, ClassType.ROGUE].map(ct => {
                             const isPending = pendingSelection?.teamId === tId.toString() && pendingSelection?.classType === ct;
                             return (
-                              <button key={ct} disabled={combatTaken || !!myPlayer} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.COMBAT, classType: ct })} className={`p-3 rounded-xl text-xs font-black transition-all ${isPending ? 'ring-4 ring-white bg-red-600' : 'bg-slate-950'}`}>
+                              <button key={ct} disabled={combatTaken || !!myPlayer} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.COMBAT, classType: ct })} className={`p-3 rounded-xl text-xs font-black transition-all ${isPending ? 'ring-4 ring-white bg-red-600' : 'bg-slate-950 disabled:opacity-30'}`}>
                                 {ct === ClassType.WARRIOR ? '🛡️ 전사' : ct === ClassType.MAGE ? '🔮 마법사' : ct === ClassType.ARCHER ? '🏹 궁수' : '🗡️ 도적'}
                               </button>
                             );
@@ -381,7 +387,7 @@ const App: React.FC = () => {
               const p: Player = { id: userName, name: userName, teamId: pendingSelection.teamId, role: pendingSelection.role, classType: pendingSelection.classType || ClassType.WARRIOR, points: 0, hasSubmittedQuiz: false };
               setMyPlayer(p);
               network.sendAction({ type: 'CONFIRM_SELECTION', payload: { player: p } });
-            }} className="w-full max-w-md py-6 rounded-[2.5rem] font-black text-3xl bg-blue-600 shadow-2xl">선택 완료</button>
+            }} className="w-full max-w-md py-6 rounded-[2.5rem] font-black text-3xl bg-blue-600 shadow-2xl disabled:opacity-50">선택 완료</button>
           </div>
         )}
       </div>
