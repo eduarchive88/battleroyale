@@ -8,6 +8,17 @@ interface GameCanvasProps {
   myTeamId?: string;
 }
 
+// 구글 드라이브 뷰어 링크를 직접 이미지 소스로 사용할 수 있도록 변환하는 헬퍼 (UCID 방식)
+const getImageUrl = (classType: ClassType) => {
+  const ids = {
+    [ClassType.WARRIOR]: '1U3Y065zOntBi-tTx4NAnJMJ1OWBIbgtd',
+    [ClassType.ARCHER]: '15KQrOqbkCoZuoS2QQh5ADc4ugTqua0_5',
+    [ClassType.MAGE]: '19YSw9IVjx8wF1qbviBaUHlBs73lT6GqB',
+    [ClassType.ROGUE]: '1vEqW-gD0N_LF1h1A8vVkPpuIZ-D6cZvG'
+  };
+  return `https://lh3.googleusercontent.com/d/${ids[classType]}`;
+};
+
 export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -31,13 +42,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
     const units = unitLayer.selectAll('.unit').data(teamArray, (d: any) => d.id).join(
       enter => {
         const g = enter.append('g').attr('class', 'unit');
-        g.append('ellipse').attr('class', 'shadow').attr('rx', 30).attr('ry', 12).attr('cy', 22).attr('fill', 'black').attr('opacity', 0.4);
-        g.append('path').attr('class', 'body').attr('d', 'M0 -35 L30 0 L0 35 L-30 0 Z').attr('fill', '#0f172a').attr('stroke-width', 4);
-        g.append('text').attr('class', 'icon').attr('text-anchor', 'middle').attr('dy', '0.35em').style('font-size', '28px');
-        const info = g.append('g').attr('transform', 'translate(0, -65)');
-        info.append('text').attr('class', 'name').attr('text-anchor', 'middle').attr('fill', 'white').style('font-size', '12px').style('font-weight', '900').style('text-shadow', '0 2px 4px black');
-        info.append('rect').attr('class', 'hp-bg').attr('x', -30).attr('y', 5).attr('width', 60).attr('height', 6).attr('fill', '#450a0a').attr('rx', 3);
-        info.append('rect').attr('class', 'hp-fg').attr('x', -30).attr('y', 5).attr('height', 6).attr('fill', '#ef4444').attr('rx', 3);
+        
+        // 그림자
+        g.append('ellipse').attr('class', 'shadow').attr('rx', 35).attr('ry', 15).attr('cy', 35).attr('fill', 'black').attr('opacity', 0.3);
+        
+        // 캐릭터 이미지 (이미지 자체를 회전시킴)
+        g.append('image')
+          .attr('class', 'char-img')
+          .attr('x', -40)
+          .attr('y', -40)
+          .attr('width', 80)
+          .attr('height', 80)
+          .attr('preserveAspectRatio', 'xMidYMid meet');
+
+        // 선택 표시기 (내 팀인 경우 테두리 효과)
+        g.append('circle').attr('class', 'selection-ring').attr('r', 45).attr('fill', 'none').attr('stroke-width', 3).attr('stroke-dasharray', '5,5');
+
+        const info = g.append('g').attr('class', 'info-ui').attr('transform', 'translate(0, -55)');
+        info.append('text').attr('class', 'name').attr('text-anchor', 'middle').attr('fill', 'white').style('font-size', '14px').style('font-weight', '900').style('text-shadow', '0 2px 4px black');
+        info.append('rect').attr('class', 'hp-bg').attr('x', -35).attr('y', 5).attr('width', 70).attr('height', 8).attr('fill', '#450a0a').attr('rx', 4);
+        info.append('rect').attr('class', 'hp-fg').attr('x', -35).attr('y', 5).attr('height', 8).attr('fill', '#ef4444').attr('rx', 4);
+        
         return g;
       }
     );
@@ -46,74 +71,62 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
       .style('opacity', d => {
         const isHidden = d.activeEffects.some(e => e.type === 'r_hide');
         if (isHidden && d.id !== myTeamId) return 0;
-        return d.isDead ? 0.15 : 1;
+        return d.isDead ? 0.2 : 1;
       });
 
-    // 보조 UI는 회전하지 않도록 역회전 처리
-    units.select('g').attr('transform', d => `rotate(${-d.angle})`);
-    units.select('.icon').attr('transform', d => `rotate(${-d.angle})`);
+    // 이미지 및 정보 UI 역회전 처리 (이름표는 항상 정방향)
+    units.select('.info-ui').attr('transform', d => `translate(0, -55) rotate(${-d.angle})`);
+    
+    units.select('.char-img')
+      .attr('xlink:href', d => getImageUrl(d.classType))
+      .style('filter', d => {
+        if (d.activeEffects.some(e => e.type === 'w_invinc')) return 'drop-shadow(0 0 10px gold) brightness(1.2)';
+        if (d.activeEffects.some(e => e.type === 'w_double')) return 'drop-shadow(0 0 10px red) saturate(2)';
+        return 'none';
+      });
 
-    units.select('.body')
-      .attr('stroke', d => d.id === myTeamId ? '#3b82f6' : '#f97316')
-      .attr('fill', d => {
-        if (d.activeEffects.some(e => e.type === 'w_invinc')) return '#facc15';
-        if (d.activeEffects.some(e => e.type === 'w_double')) return '#991b1b';
-        return '#0f172a';
-      })
-      .style('filter', d => d.id === myTeamId ? 'drop-shadow(0 0 10px #3b82f6)' : 'none');
+    units.select('.selection-ring')
+      .attr('stroke', d => d.id === myTeamId ? '#3b82f6' : 'none')
+      .attr('opacity', d => d.id === myTeamId ? 1 : 0);
 
-    units.select('.icon').text(d => {
-      if (d.classType === ClassType.WARRIOR) return '🛡️';
-      if (d.classType === ClassType.MAGE) return '🔮';
-      if (d.classType === ClassType.ARCHER) return '🏹';
-      return '🗡️';
-    });
+    units.select('.name').text(d => d.name);
+    units.select('.hp-fg').attr('width', d => Math.max(0, (d.hp / d.maxHp) * 70));
 
-    units.select('.hp-fg').attr('width', d => Math.max(0, (d.hp / d.maxHp) * 60));
-
-    // 클래스별 360도 공격 및 스킬 이펙트
+    // 이펙트 레이어 렌더링 (공격)
     teamArray.forEach((d: Team) => {
       const timeSinceAtk = Date.now() - d.lastAtkTime;
       const angleRad = d.angle * (Math.PI / 180);
 
       if (timeSinceAtk < 300) {
         if (d.classType === ClassType.WARRIOR) {
-          // 전사: 90도 부채꼴 휘두르기
-          const arc = d3.arc()({ innerRadius: 20, outerRadius: 80, startAngle: angleRad - Math.PI/4, endAngle: angleRad + Math.PI/4 });
-          effectLayer.append('path').attr('d', arc!).attr('fill', 'rgba(255,255,255,0.4)').attr('transform', `translate(${d.x}, ${d.y})`)
+          const arc = d3.arc()({ innerRadius: 30, outerRadius: 100, startAngle: angleRad - Math.PI/4 + Math.PI/2, endAngle: angleRad + Math.PI/4 + Math.PI/2 });
+          effectLayer.append('path').attr('d', arc!).attr('fill', 'rgba(255,255,255,0.5)').attr('transform', `translate(${d.x}, ${d.y})`)
             .transition().duration(250).style('opacity', 0).remove();
         } else if (d.classType === ClassType.ROGUE) {
-          // 도적: 타격 지점 X자 난도질
           const tx = d.x + Math.cos(angleRad) * 60;
           const ty = d.y + Math.sin(angleRad) * 60;
-          effectLayer.append('path').attr('d', `M${tx-20},${ty-20} L${tx+20},${ty+20} M${tx+20},${ty-20} L${tx-20},${ty+20}`)
-            .attr('stroke', '#fff').attr('stroke-width', 4).transition().duration(200).style('opacity', 0).remove();
+          effectLayer.append('path').attr('d', `M${tx-25},${ty-25} L${tx+25},${ty+25} M${tx+25},${ty-25} L${tx-25},${ty+25}`)
+            .attr('stroke', '#fff').attr('stroke-width', 5).transition().duration(200).style('opacity', 0).remove();
         } else if (d.classType === ClassType.MAGE) {
-          // 마법사: 날아가는 파이어볼
           const startX = d.x; const startY = d.y;
-          const endX = d.x + Math.cos(angleRad) * 300;
-          const endY = d.y + Math.sin(angleRad) * 300;
-          effectLayer.append('circle').attr('cx', startX).attr('cy', startY).attr('r', 10).attr('fill', '#f97316').style('filter', 'blur(3px)')
+          const endX = d.x + Math.cos(angleRad) * 350;
+          const endY = d.y + Math.sin(angleRad) * 350;
+          effectLayer.append('circle').attr('cx', startX).attr('cy', startY).attr('r', 12).attr('fill', '#60a5fa').style('filter', 'blur(4px)')
             .transition().duration(300).attr('cx', endX).attr('cy', endY).style('opacity', 0).remove();
         } else if (d.classType === ClassType.ARCHER) {
-          // 궁수: 직선 화살
-          const endX = d.x + Math.cos(angleRad) * 400;
-          const endY = d.y + Math.sin(angleRad) * 400;
-          effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', '#94a3b8').attr('stroke-width', 2)
+          const endX = d.x + Math.cos(angleRad) * 450;
+          const endY = d.y + Math.sin(angleRad) * 450;
+          effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', '#fbbf24').attr('stroke-width', 3)
             .transition().duration(200).style('opacity', 0).remove();
         }
       }
 
-      // 스킬 이펙트 특수 처리
       d.activeEffects.forEach(eff => {
         if (eff.type === 'm_laser') {
-           const endX = d.x + Math.cos(angleRad) * 1000;
-           const endY = d.y + Math.sin(angleRad) * 1000;
-           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', 'rgba(100,200,255,0.7)').attr('stroke-width', 20)
-            .transition().duration(100).style('opacity', 0).remove();
-        }
-        if (eff.type === 'w_invinc') {
-          unitLayer.select(`[data-id="${d.id}"]`).select('.body').attr('stroke', '#facc15').attr('stroke-width', 8);
+           const endX = d.x + Math.cos(angleRad) * 1200;
+           const endY = d.y + Math.sin(angleRad) * 1200;
+           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', 'rgba(100,200,255,0.8)').attr('stroke-width', 25)
+            .transition().duration(150).style('opacity', 0).remove();
         }
       });
     });
