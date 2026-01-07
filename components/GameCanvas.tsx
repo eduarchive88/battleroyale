@@ -21,18 +21,17 @@ const getImageUrl = (classType: ClassType) => {
 export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const lastAtkHandled = useRef<Record<string, number>>({});
+  const lastSkillHandled = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
-    
     let mainLayer = svg.select('.main-layer');
     if (mainLayer.empty()) {
       mainLayer = svg.append('g').attr('class', 'main-layer');
       mainLayer.append('g').attr('class', 'grid-layer').lower();
       mainLayer.append('g').attr('class', 'effect-layer');
       mainLayer.append('g').attr('class', 'unit-layer');
-      
       const grid = mainLayer.select('.grid-layer');
       for (let i = 0; i <= 1000; i += 100) {
         grid.append('line').attr('x1', i).attr('y1', 0).attr('x2', i).attr('y2', 1000).attr('stroke', '#1e293b').attr('stroke-width', 1).attr('opacity', 0.2);
@@ -73,56 +72,45 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
         return 'none';
       });
 
-    units.select('.selection-ring').attr('stroke', d => d.id === myTeamId ? '#3b82f6' : 'none').attr('opacity', d => d.id === myTeamId ? 1 : 0);
+    units.select('.selection-ring').attr('stroke', d => d.id === myTeamId ? '#fbbf24' : 'none').attr('opacity', d => d.id === myTeamId ? 1 : 0);
     units.select('.name').text(d => `${d.name} (${d.points}P)`);
     units.select('.hp-fg').attr('width', d => Math.max(0, (d.hp / d.maxHp) * 70));
 
-    // 이펙트 자가 정화 및 렌더링
     teamArray.forEach((d: Team) => {
       const angleRad = d.angle * (Math.PI / 180);
       const now = Date.now();
 
-      // 1. 기본 공격 시각화 (클래스별 상이)
       if (d.lastAtkTime > (lastAtkHandled.current[d.id] || 0)) {
         lastAtkHandled.current[d.id] = d.lastAtkTime;
-        const rangeMult = d.activeEffects.some(e => e.type === 'a_range') ? 3 : 1;
+        const rangeMult = d.activeEffects.some(e => e.type === 'a_range') ? 2.5 : 1;
         const actualRange = d.stats.range * rangeMult;
-
         if (d.classType === ClassType.WARRIOR || d.classType === ClassType.ROGUE) {
-          // 참격(Slash) 이펙트 - 캐릭터 전방 부채꼴
-          const arc = d3.arc().innerRadius(10).outerRadius(actualRange).startAngle(Math.PI/2 - 0.7).endAngle(Math.PI/2 + 0.7);
-          effectLayer.append('path').attr('d', arc as any)
-            .attr('transform', `translate(${d.x}, ${d.y}) rotate(${d.angle - 90})`)
-            .attr('fill', d.classType === ClassType.WARRIOR ? 'rgba(255,255,255,0.4)' : 'rgba(255,0,0,0.4)')
-            .transition().duration(200).style('opacity', 0).remove();
+          const arc = d3.arc().innerRadius(10).outerRadius(actualRange).startAngle(Math.PI/2 - 1).endAngle(Math.PI/2 + 1);
+          effectLayer.append('path').attr('d', arc as any).attr('transform', `translate(${d.x}, ${d.y}) rotate(${d.angle - 90})`).attr('fill', 'rgba(255,255,255,0.4)').transition().duration(200).style('opacity', 0).remove();
         } else {
-          // 투사체/화살(Projectile) 이펙트 - 직선
           const endX = d.x + Math.cos(angleRad) * actualRange;
           const endY = d.y + Math.sin(angleRad) * actualRange;
-          effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY)
-            .attr('stroke', d.classType === ClassType.ARCHER ? '#fff' : '#0ff').attr('stroke-width', 4)
-            .attr('stroke-dasharray', '10,5')
-            .transition().duration(200).style('opacity', 0).remove();
+          effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', d.classType === ClassType.ARCHER ? '#fff' : '#0ff').attr('stroke-width', 3).transition().duration(150).style('opacity', 0).remove();
         }
       }
 
-      // 2. 스킬 이펙트 (지속 시간 만료 전까지만 렌더링)
       d.activeEffects.forEach(eff => {
         if (eff.until < now) return;
-
         if (eff.type === 'm_laser') {
            const endX = d.x + Math.cos(angleRad) * 1000;
            const endY = d.y + Math.sin(angleRad) * 1000;
-           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY)
-            .attr('stroke', 'cyan').attr('stroke-width', 20).attr('opacity', 0.6).style('filter', 'blur(5px)')
-            .transition().duration(100).remove();
-           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY)
-            .attr('stroke', 'white').attr('stroke-width', 5).transition().duration(100).remove();
+           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', 'cyan').attr('stroke-width', 15).attr('opacity', 0.6).transition().duration(100).remove();
+        }
+        if (eff.type === 'a_multi') {
+            for (let angleOff = -40; angleOff <= 40; angleOff += 20) {
+                const rad = (d.angle + angleOff) * (Math.PI / 180);
+                const ex = d.x + Math.cos(rad) * 500;
+                const ey = d.y + Math.sin(rad) * 500;
+                effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', ex).attr('y2', ey).attr('stroke', '#fff').attr('stroke-width', 4).transition().duration(200).style('opacity',0).remove();
+            }
         }
         if (eff.type === 'm_thunder') {
-           effectLayer.append('circle').attr('cx', d.x).attr('cy', d.y).attr('r', 400)
-            .attr('fill', 'none').attr('stroke', 'yellow').attr('stroke-width', 4).attr('opacity', 0.5)
-            .transition().duration(300).attr('r', 450).style('opacity', 0).remove();
+           effectLayer.append('circle').attr('cx', d.x).attr('cy', d.y).attr('r', 10).attr('fill', 'none').attr('stroke', 'yellow').attr('stroke-width', 5).transition().duration(300).attr('r', 400).style('opacity', 0).remove();
         }
       });
     });
