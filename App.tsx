@@ -30,12 +30,20 @@ const App: React.FC = () => {
   useEffect(() => {
     const unsub = socket.subscribe('stateChange', (state: any) => {
       setGameState(state);
-      if (state.isStarted && view === 'lobby') setView('game');
+      // 게임이 시작되면 로비에 있던 학생들을 게임 뷰로 전환
+      if (state.isStarted && (view === 'lobby' || view === 'host_lobby')) {
+        setView(myPlayer ? 'game' : (view === 'host_lobby' ? 'host_lobby' : 'lobby'));
+        // 호스트는 계속 호스트 로비(현황판)를 보거나 별도의 뷰가 필요하지만, 일단 게임 화면으로 가거나 유지
+        if (view === 'host_lobby') {
+           // 호스트는 게임 시작 후에도 현황을 보거나 관리해야 하므로 뷰 유지 가능
+        } else {
+           setView('game');
+        }
+      }
     });
     return unsub;
-  }, [view]);
+  }, [view, myPlayer]);
 
-  // CSV Parsing
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -76,15 +84,10 @@ const App: React.FC = () => {
     if (!pendingSelection || !userName) return;
     const { teamId, role, classType } = pendingSelection;
 
-    // 중복 체크 (안전 장치)
-    const players = Object.values(gameState.players);
-    if (role === Role.QUIZ && players.some(p => p.teamId === teamId && p.role === Role.QUIZ)) return alert("이미 자리가 찼습니다.");
-    if (role === Role.COMBAT && players.some(p => p.teamId === teamId && p.role === Role.COMBAT)) return alert("이미 자리가 찼습니다.");
-    if (role === Role.SUPPORT && players.filter(p => p.teamId === teamId && p.role === Role.SUPPORT).length >= 2) return alert("이미 자리가 찼습니다.");
-
     const playerId = userName;
     const newPlayer: Player = { id: playerId, name: userName, teamId, role, classType: classType || ClassType.WARRIOR, points: 0 };
     
+    // 기존 플레이어 목록에 추가하여 전체 상태 업데이트
     const updatedPlayers = { ...gameState.players, [playerId]: newPlayer };
     const updatedTeams = { ...gameState.teams };
     
@@ -115,6 +118,10 @@ const App: React.FC = () => {
     setPendingSelection(null);
   };
 
+  const startGame = () => {
+    socket.emit('stateChange', { isStarted: true });
+  };
+
   const handleQuizAnswer = (correct: boolean) => {
     if (!myPlayer) return;
     const pointsToAdd = correct ? 6 : 4;
@@ -138,7 +145,8 @@ const App: React.FC = () => {
     const myTeam = gameState.teams[myPlayer.teamId];
     if (!myTeam || myTeam.isDead) return;
     const updatedTeams = { ...gameState.teams };
-    Object.values(updatedTeams).forEach(target => {
+    // FIX: cast Object.values to Team[] to access properties correctly
+    (Object.values(updatedTeams) as Team[]).forEach(target => {
       if (target.id === myPlayer.teamId || target.isDead) return;
       const d = Math.sqrt(Math.pow(target.x - myTeam.x, 2) + Math.pow(target.y - myTeam.y, 2));
       if (d < myTeam.stats.range) {
@@ -153,11 +161,11 @@ const App: React.FC = () => {
   if (view === 'landing') {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-[#020617] text-white bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')]">
-        <div className="text-center mb-12 animate-pulse">
+        <div className="text-center mb-12">
           <h1 className="text-8xl font-black italic text-transparent bg-clip-text bg-gradient-to-b from-blue-300 via-white to-blue-600 drop-shadow-2xl">EDU ARENA</h1>
           <p className="text-blue-400 font-bold tracking-[0.5em] mt-4 uppercase">Fantasy Battle Royale</p>
         </div>
-        <div className="w-full max-w-md p-10 bg-slate-900/80 backdrop-blur-xl rounded-[3rem] border-2 border-blue-500/30 shadow-[0_0_50px_rgba(59,130,246,0.2)] space-y-8">
+        <div className="w-full max-w-md p-10 bg-slate-900/80 backdrop-blur-xl rounded-[3rem] border-2 border-blue-500/30 shadow-2xl space-y-8">
           <div className="space-y-4">
             <input className="w-full p-5 bg-slate-800 border border-slate-700 rounded-2xl text-white outline-none focus:ring-2 ring-blue-500 font-bold" placeholder="영웅 닉네임" value={userName} onChange={e => setUserName(e.target.value)} />
             <input className="w-full p-5 bg-slate-800 border border-slate-700 rounded-2xl text-white outline-none focus:ring-2 ring-blue-500 uppercase font-black" placeholder="방 코드" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
@@ -190,19 +198,19 @@ const App: React.FC = () => {
                   }} />
                 ))}
               </div>
-              <button onClick={() => { if(newQuiz.question) { setQuizList([...quizList, newQuiz]); setNewQuiz({question:'', options:['','','',''], answer:0}); } }} className="w-full py-4 bg-blue-600 rounded-2xl font-black">추가</button>
+              <button onClick={() => { if(newQuiz.question) { setQuizList([...quizList, newQuiz]); setNewQuiz({question:'', options:['','','',''], answer:0}); } }} className="w-full py-4 bg-blue-600 rounded-2xl font-black">리스트 추가</button>
             </div>
             <div className="bg-slate-900 p-8 rounded-[3rem] border border-emerald-500/20 shadow-2xl space-y-4">
               <h3 className="text-xl font-black">2. 엑셀(CSV) 업로드</h3>
               <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleFileUpload} />
-              <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded-2xl font-bold">파일 선택</button>
+              <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded-2xl font-bold">CSV 파일 선택</button>
               <button onClick={() => {
                 const blob = new Blob(["\ufeff문제,보기1,보기2,보기3,보기4,정답(1-4)\n사과는 영어로?,Apple,Banana,Grape,Peach,1"], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(blob);
                 link.setAttribute("download", "quiz_template.csv");
                 link.click();
-              }} className="w-full text-center text-xs text-slate-500 underline">샘플 양식 다운로드</button>
+              }} className="w-full text-center text-xs text-slate-500 underline">양식 다운로드</button>
             </div>
           </div>
           <div className="col-span-7 space-y-8">
@@ -215,7 +223,10 @@ const App: React.FC = () => {
                  </div>
                ))}
             </div>
-            <button onClick={createRoom} className="w-full py-6 bg-blue-600 hover:bg-blue-500 rounded-2xl font-black text-3xl shadow-xl transition-all active:scale-95">방 생성 및 학생 대기</button>
+            <div className="bg-slate-900 p-6 rounded-3xl border border-white/10 flex flex-col gap-4">
+               <input className="w-full p-4 bg-black rounded-xl text-center text-2xl font-black uppercase" placeholder="방 코드 지정" value={customCode} onChange={e => setCustomCode(e.target.value)} />
+               <button onClick={createRoom} className="w-full py-6 bg-blue-600 hover:bg-blue-500 rounded-2xl font-black text-3xl shadow-xl transition-all">방 생성 및 학생 대기</button>
+            </div>
           </div>
         </div>
       </div>
@@ -223,35 +234,43 @@ const App: React.FC = () => {
   }
 
   if (view === 'host_lobby') {
-    const players = Object.values(gameState.players);
+    // FIX: cast Object.values to Player[]
+    const players = Object.values(gameState.players) as Player[];
     return (
       <div className="h-screen bg-[#020617] text-white flex flex-col p-10">
-        <header className="flex justify-between items-center mb-8 bg-slate-900/50 p-8 rounded-[3rem] border border-white/5 shadow-2xl">
+        <header className="flex justify-between items-center mb-8 bg-slate-900/50 p-8 rounded-[3rem] border border-white/10 shadow-2xl">
           <div>
-            <p className="text-blue-500 font-black text-xs tracking-widest uppercase mb-1">Entrance Code</p>
+            <p className="text-blue-500 font-black text-xs tracking-widest uppercase mb-1">Room Code</p>
             <h2 className="text-7xl font-mono font-black">{gameState.roomCode}</h2>
           </div>
-          <button onClick={() => socket.emit('stateChange', { isStarted: true })} className="px-16 py-8 bg-emerald-600 hover:bg-emerald-500 rounded-3xl font-black text-4xl shadow-2xl">게임 시작</button>
+          <div className="flex flex-col items-end gap-2">
+             <p className="text-xs font-bold text-slate-500">현재 접속 인원: {players.length}명</p>
+             <button onClick={startGame} className="px-16 py-8 bg-emerald-600 hover:bg-emerald-500 rounded-3xl font-black text-4xl shadow-2xl transition-all active:scale-95">게임 시작!</button>
+          </div>
         </header>
         
         <div className="flex-1 grid grid-cols-3 gap-8 overflow-y-auto custom-scrollbar">
           {[1,2,3,4,5,6,7,8,9].map(tId => {
             const teamPlayers = players.filter(p => p.teamId === tId.toString());
+            const quizUser = teamPlayers.find(p => p.role === Role.QUIZ);
+            const supportUsers = teamPlayers.filter(p => p.role === Role.SUPPORT);
+            const combatUser = teamPlayers.find(p => p.role === Role.COMBAT);
+
             return (
-              <div key={tId} className="bg-slate-900/80 p-6 rounded-[2.5rem] border border-white/10 space-y-4 shadow-xl">
-                <h3 className="text-2xl font-black italic border-b border-white/10 pb-2">{tId} 모둠</h3>
-                <div className="space-y-2">
-                  <div className={`p-2 rounded-xl flex justify-between items-center text-xs font-bold ${teamPlayers.some(p => p.role === Role.QUIZ) ? 'bg-blue-600/20 text-blue-400' : 'bg-white/5 text-slate-600'}`}>
-                    <span>🧠 문제풀이</span>
-                    <span>{teamPlayers.find(p => p.role === Role.QUIZ)?.name || '비어있음'}</span>
+              <div key={tId} className={`bg-slate-900/80 p-6 rounded-[2.5rem] border transition-all ${teamPlayers.length > 0 ? 'border-blue-500/50 shadow-[0_0_30px_rgba(59,130,246,0.1)]' : 'border-white/5'}`}>
+                <h3 className="text-2xl font-black italic border-b border-white/10 pb-2 mb-4">{tId} 모둠</h3>
+                <div className="space-y-3">
+                  <div className={`p-3 rounded-xl flex justify-between items-center text-sm font-bold ${quizUser ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'bg-white/5 text-slate-600'}`}>
+                    <span className="flex items-center gap-2">🧠 {quizUser ? quizUser.name : '문제풀이'}</span>
+                    <span className="text-[10px]">{quizUser ? '완료' : '대기'}</span>
                   </div>
-                  <div className={`p-2 rounded-xl flex justify-between items-center text-xs font-bold ${teamPlayers.filter(p => p.role === Role.SUPPORT).length > 0 ? 'bg-emerald-600/20 text-emerald-400' : 'bg-white/5 text-slate-600'}`}>
-                    <span>🛡️ 서포터 ({teamPlayers.filter(p => p.role === Role.SUPPORT).length}/2)</span>
-                    <span className="truncate max-w-[100px]">{teamPlayers.filter(p => p.role === Role.SUPPORT).map(p => p.name).join(', ') || '비어있음'}</span>
+                  <div className={`p-3 rounded-xl flex justify-between items-center text-sm font-bold ${supportUsers.length > 0 ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 text-slate-600'}`}>
+                    <span className="flex items-center gap-2">🛡️ {supportUsers.length > 0 ? supportUsers.map(s => s.name).join(', ') : '서포터'}</span>
+                    <span className="text-[10px]">{supportUsers.length}/2</span>
                   </div>
-                  <div className={`p-2 rounded-xl flex justify-between items-center text-xs font-bold ${teamPlayers.some(p => p.role === Role.COMBAT) ? 'bg-red-600/20 text-red-400' : 'bg-white/5 text-slate-600'}`}>
-                    <span>⚔️ 전투요원</span>
-                    <span>{teamPlayers.find(p => p.role === Role.COMBAT)?.name || '비어있음'}</span>
+                  <div className={`p-3 rounded-xl flex justify-between items-center text-sm font-bold ${combatUser ? 'bg-red-600/20 text-red-400 border border-red-500/30' : 'bg-white/5 text-slate-600'}`}>
+                    <span className="flex items-center gap-2">⚔️ {combatUser ? `${combatUser.name} (${combatUser.classType})` : '전투요원'}</span>
+                    <span className="text-[10px]">{combatUser ? '완료' : '대기'}</span>
                   </div>
                 </div>
               </div>
@@ -263,7 +282,8 @@ const App: React.FC = () => {
   }
 
   if (view === 'lobby') {
-    const players = Object.values(gameState.players);
+    // FIX: cast Object.values to Player[]
+    const players = Object.values(gameState.players) as Player[];
     return (
       <div className="h-screen bg-[#020617] text-white flex flex-col p-6 overflow-hidden">
         <h2 className="text-5xl font-black italic text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-white">모둠 및 역할 선택</h2>
@@ -275,7 +295,6 @@ const App: React.FC = () => {
               const quizTaken = teamPlayers.some(p => p.role === Role.QUIZ);
               const combatTaken = teamPlayers.some(p => p.role === Role.COMBAT);
               const supporters = teamPlayers.filter(p => p.role === Role.SUPPORT).length;
-              
               const isMyTeam = myPlayer?.teamId === tId.toString();
 
               return (
@@ -290,7 +309,6 @@ const App: React.FC = () => {
                       <span>🧠 문제풀이</span>
                       <span className="text-xs uppercase">{quizTaken ? '선택 완료' : '선택 가능'}</span>
                     </button>
-                    
                     <button 
                       disabled={supporters >= 2 || !!myPlayer}
                       onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.SUPPORT })}
@@ -299,7 +317,6 @@ const App: React.FC = () => {
                       <span>🛡️ 서포터 ({supporters}/2)</span>
                       <span className="text-xs uppercase">{supporters >= 2 ? '선택 완료' : '선택 가능'}</span>
                     </button>
-
                     <div className="pt-4 border-t border-white/10 mt-2">
                       <p className="text-[10px] font-black text-slate-500 uppercase mb-3 tracking-widest">전투요원 클래스</p>
                       <div className="grid grid-cols-2 gap-3">
@@ -336,7 +353,7 @@ const App: React.FC = () => {
             </button>
           </div>
         )}
-        {myPlayer && <div className="fixed bottom-12 left-0 right-0 text-center font-black text-blue-400 animate-pulse text-xl">다른 모험가들을 기다리는 중...</div>}
+        {myPlayer && <div className="fixed bottom-12 left-0 right-0 text-center font-black text-blue-400 animate-pulse text-xl italic">다른 모험가들을 기다리는 중...</div>}
       </div>
     );
   }
