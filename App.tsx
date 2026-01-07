@@ -118,11 +118,12 @@ const App: React.FC = () => {
       const dx = target.x - t.x; const dy = target.y - t.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       const angleToTarget = Math.atan2(dy, dx);
-      const angleDiff = Math.abs(angleToTarget - attackerAngleRad);
-      const normalizedDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
+      const angleDiff = Math.abs(Math.atan2(Math.sin(angleToTarget - attackerAngleRad), Math.cos(angleToTarget - attackerAngleRad)));
+      
       let isHit = (t.classType === ClassType.WARRIOR || t.classType === ClassType.ROGUE) 
-        ? (dist < t.stats.range * rangeMult && Math.abs(normalizedDiff) < Math.PI / 3)
-        : (dist < t.stats.range * rangeMult && Math.abs(normalizedDiff) < 0.25);
+        ? (dist < t.stats.range * rangeMult && Math.abs(angleDiff) < Math.PI / 2.5)
+        : (dist < t.stats.range * rangeMult && Math.abs(angleDiff) < 0.3);
+      
       if (isHit && !target.activeEffects.some((e: any) => e.type === 'w_invinc')) {
         const damage = Math.max(8, (t.stats.atk * (t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1)) - target.stats.def);
         target.hp = Math.max(0, target.hp - damage);
@@ -217,10 +218,18 @@ const App: React.FC = () => {
             });
             if (closestTarget) {
               const rad = (closestTarget.angle * Math.PI) / 180;
-              t.x = closestTarget.x - Math.cos(rad) * 40;
-              t.y = closestTarget.y - Math.sin(rad) * 40;
+              t.x = closestTarget.x - Math.cos(rad) * 60;
+              t.y = closestTarget.y - Math.sin(rad) * 60;
               t.angle = closestTarget.angle;
-              executeAttack(newState, t.id);
+              // 텔레포트 후 즉시 공격 실행 (판정 딜레이 고려)
+              setTimeout(() => {
+                setGameState(current => {
+                  const s = JSON.parse(JSON.stringify(current)) as GameState;
+                  executeAttack(s, t.id);
+                  network.broadcastState(s);
+                  return s;
+                });
+              }, 50);
             }
           } else if (skill.id === 'm_ice') {
             let closestTarget: any = null;
@@ -244,7 +253,8 @@ const App: React.FC = () => {
                     const dist = Math.sqrt(dx * dx + dy * dy);
                     const angleToTarget = Math.atan2(dy, dx);
                     const angleDiff = Math.abs(Math.atan2(Math.sin(angleToTarget - attackerAngleRad), Math.cos(angleToTarget - attackerAngleRad)));
-                    if (dist < 1000 && angleDiff < 0.1) {
+                    // 레이저 판정 폭 상향 (0.1 -> 0.25)
+                    if (dist < 1000 && angleDiff < 0.25) {
                         target.hp = Math.max(0, target.hp - (t.stats.atk * 2.5));
                         if(target.hp === 0) target.isDead = true;
                     }
@@ -543,10 +553,10 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className={`w-full md:w-[450px] border-l-[10px] border-amber-950 p-6 overflow-y-auto custom-scrollbar bg-slate-900 text-amber-100 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] shadow-inner z-40`}>
+        <div className={`w-full md:w-[450px] border-l-[10px] border-amber-950 p-6 overflow-y-auto custom-scrollbar ${gameState.phase === 'QUIZ' ? 'bg-indigo-950/90' : 'bg-slate-900'} text-amber-100 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] shadow-inner z-40 transition-colors duration-500`}>
           {isTeacher ? (
             <div className="space-y-6">
-              <h3 className="text-4xl font-black italic text-amber-600 border-b-4 border-amber-900 pb-4 uppercase">교사용 대시보드</h3>
+              <h3 className={`text-4xl font-black italic border-b-4 pb-4 uppercase transition-colors ${gameState.phase === 'QUIZ' ? 'text-indigo-400 border-indigo-800' : 'text-amber-600 border-amber-900'}`}>교사용 대시보드</h3>
               <div className="bg-black/80 p-8 border-double border-[8px] border-amber-900 space-y-4">
                 <p className="text-xs font-black text-amber-800 uppercase tracking-widest">현재 퀴즈</p>
                 <p className="text-2xl font-black leading-tight text-amber-100 italic">" {currentQuiz.question} "</p>

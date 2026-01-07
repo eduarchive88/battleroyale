@@ -5,7 +5,7 @@ export const CLASS_BASE_STATS: Record<ClassType, CharacterStats & { hp: number; 
   [ClassType.WARRIOR]: { atk: 25, def: 20, range: 60, speed: 4, atkSpeed: 1, hp: 200, mp: 60 },
   [ClassType.MAGE]: { atk: 30, def: 8, range: 300, speed: 3.5, atkSpeed: 0.8, hp: 100, mp: 150 },
   [ClassType.ARCHER]: { atk: 20, def: 12, range: 400, speed: 4.5, atkSpeed: 1.2, hp: 120, mp: 80 },
-  [ClassType.ROGUE]: { atk: 22, def: 10, range: 40, speed: 5.5, atkSpeed: 1.8, hp: 110, mp: 100 },
+  [ClassType.ROGUE]: { atk: 22, def: 10, range: 60, speed: 5.5, atkSpeed: 1.8, hp: 110, mp: 100 },
 };
 
 export const COSTS = {
