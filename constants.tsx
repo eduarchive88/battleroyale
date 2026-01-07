@@ -21,18 +21,18 @@ export const SKILLS_INFO: Record<ClassType, { id: string; name: string; desc: st
     { id: 'w_double', name: '분노', desc: '2초간 공격력 2배', mp: 20 }
   ],
   [ClassType.ROGUE]: [
-    { id: 'r_tele', name: '습격', desc: '무작위 적 뒤로 이동', mp: 20 },
+    { id: 'r_tele', name: '습격', desc: '적 뒤로 순간이동 습격', mp: 20 },
     { id: 'r_aspeed', name: '난도질', desc: '2초간 공속 2배', mp: 15 },
     { id: 'r_hide', name: '은신', desc: '2초간 투명화', mp: 30 }
   ],
   [ClassType.MAGE]: [
-    { id: 'm_laser', name: '라이트닝', desc: '직선 레이저 발사', mp: 25 },
-    { id: 'm_thunder', name: '벼락치기', desc: '광역 벼락', mp: 40 },
-    { id: 'm_ice', name: '아이스볼', desc: '맞은 적 1초 스턴', mp: 20 }
+    { id: 'm_laser', name: '라이트닝', desc: '강력한 직선 레이저 발사', mp: 25 },
+    { id: 'm_thunder', name: '벼락치기', desc: '광역 벼락 데미지', mp: 40 },
+    { id: 'm_ice', name: '아이스볼', desc: '가까운 적 1초 빙결', mp: 20 }
   ],
   [ClassType.ARCHER]: [
-    { id: 'a_multi', name: '멀티샷', desc: '화살 5개 발사', mp: 25 },
-    { id: 'a_range', name: '저격', desc: '사거리 3배', mp: 20 },
+    { id: 'a_multi', name: '멀티샷', desc: '화살 5개 부채꼴 발사', mp: 25 },
+    { id: 'a_range', name: '저격', desc: '사거리 2.5배 증가', mp: 20 },
     { id: 'a_aspeed', name: '속사', desc: '공속 2배', mp: 20 }
   ]
 };

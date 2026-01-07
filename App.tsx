@@ -165,6 +165,7 @@ const App: React.FC = () => {
         case 'MOVE': {
           const t = newState.teams[payload.teamId];
           if (t && !t.isDead && newState.phase === 'BATTLE') {
+            if (t.activeEffects.some(e => e.type === 'm_ice')) return newState;
             const speedMult = t.activeEffects.some(e => e.type === 'w_speed') ? 2 : 1;
             t.x = Math.max(0, Math.min(1000, t.x + payload.dir.x * t.stats.speed * 4 * speedMult));
             t.y = Math.max(0, Math.min(1000, t.y + payload.dir.y * t.stats.speed * 4 * speedMult));
@@ -221,8 +222,34 @@ const App: React.FC = () => {
               t.angle = closestTarget.angle;
               executeAttack(newState, t.id);
             }
+          } else if (skill.id === 'm_ice') {
+            let closestTarget: any = null;
+            let minDist = Infinity;
+            Object.values(newState.teams).forEach(target => {
+              if (target.id === t.id || target.isDead) return;
+              const d = Math.sqrt((target.x - t.x)**2 + (target.y - t.y)**2);
+              if (d < minDist) { minDist = d; closestTarget = target; }
+            });
+            if (closestTarget) {
+              closestTarget.activeEffects.push({ type: 'm_ice', until: now + 1500 });
+              t.activeEffects.push({ type: 'm_ice_trigger', until: now + 500 });
+            }
           } else if (['w_speed', 'w_invinc', 'w_double', 'r_hide', 'a_range', 'm_laser', 'a_multi'].includes(skill.id)) {
             t.activeEffects.push({ type: skill.id, until: now + 2000 });
+            if (skill.id === 'm_laser') {
+                const attackerAngleRad = t.angle * (Math.PI / 180);
+                Object.values(newState.teams).forEach((target: any) => {
+                    if (target.id === t.id || target.isDead) return;
+                    const dx = target.x - t.x; const dy = target.y - t.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const angleToTarget = Math.atan2(dy, dx);
+                    const angleDiff = Math.abs(Math.atan2(Math.sin(angleToTarget - attackerAngleRad), Math.cos(angleToTarget - attackerAngleRad)));
+                    if (dist < 1000 && angleDiff < 0.1) {
+                        target.hp = Math.max(0, target.hp - (t.stats.atk * 2.5));
+                        if(target.hp === 0) target.isDead = true;
+                    }
+                });
+            }
             if (skill.id === 'a_multi') {
                 Object.values(newState.teams).forEach((target: any) => {
                     if (target.id === t.id || target.isDead) return;
@@ -465,8 +492,6 @@ const App: React.FC = () => {
     const team = myPlayer ? gameState.teams[myPlayer.teamId] : null;
     const currentQuizIdx = gameState.currentQuizIndex;
     const currentQuiz = gameState.quizzes[currentQuizIdx] || { question: "퀴즈 대기 중...", options: ["-","-","-","-"], answer: 0 };
-    
-    // 이전 퀴즈 결과 송출용 (BATTLE 단계에서 하단에 표시)
     const lastQuiz = gameState.phase === 'BATTLE' ? gameState.quizzes[currentQuizIdx] : null;
 
     if (gameState.phase === 'GAME_OVER') {
@@ -496,16 +521,6 @@ const App: React.FC = () => {
             <p className="text-[10px] font-black uppercase text-amber-600 tracking-widest mb-1">{gameState.phase === 'QUIZ' ? '퀴즈 시간' : '전투 시간'}</p>
             <p className="text-5xl font-mono font-black text-amber-100">{gameState.timer}s</p>
           </div>
-
-          {lastQuiz && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 w-full max-w-2xl px-4 pointer-events-none">
-              <div className="bg-black/80 p-4 border-l-4 border-amber-600 shadow-2xl text-center">
-                <p className="text-[10px] text-amber-500 font-bold mb-1 uppercase tracking-tighter">직전 문제 학습</p>
-                <p className="text-sm font-bold text-white mb-2 italic">" {lastQuiz.question} "</p>
-                <p className="text-xs font-black text-amber-400">정답: {lastQuiz.options[lastQuiz.answer]}</p>
-              </div>
-            </div>
-          )}
 
           {myPlayer?.role === Role.COMBAT && gameState.phase === 'BATTLE' && team && !team.isDead && (
             <>
@@ -543,6 +558,16 @@ const App: React.FC = () => {
                 <button onClick={() => handleHostAction({type:'ADJUST_TIMER', payload:{amount:-10}})} className="bg-red-950/40 border-4 border-red-900 py-4 font-black">-10초</button>
               </div>
               <button onClick={() => handleHostAction({type:'SKIP_PHASE', payload:{}})} className="w-full bg-amber-800 border-4 border-amber-400 py-6 font-black text-2xl shadow-2xl hover:bg-amber-700">다음 단계로 넘기기</button>
+              
+              {lastQuiz && (
+                <div className="mt-8 pt-8 border-t-4 border-amber-900/50">
+                    <div className="bg-black/80 p-4 border-l-4 border-amber-600 shadow-2xl">
+                        <p className="text-[10px] text-amber-500 font-bold mb-1 uppercase tracking-tighter">직전 문제 학습 현황</p>
+                        <p className="text-sm font-bold text-white mb-2 italic">" {lastQuiz.question} "</p>
+                        <p className="text-xs font-black text-amber-400">정답: {lastQuiz.options[lastQuiz.answer]}</p>
+                    </div>
+                </div>
+              )}
             </div>
           ) : myPlayer?.role === Role.QUIZ ? (
             <div className="space-y-8">
@@ -564,7 +589,18 @@ const App: React.FC = () => {
                     ))}
                   </div>
                 )
-              ) : <div className="p-20 text-center opacity-40 font-black italic border-4 border-amber-950 bg-black/50">전투가 진행 중입니다...<br/><br/>다음 퀴즈를 준비하세요.</div>}
+              ) : (
+                <div className="space-y-8">
+                  <div className="p-20 text-center opacity-40 font-black italic border-4 border-amber-950 bg-black/50">전투가 진행 중입니다...<br/><br/>다음 퀴즈를 준비하세요.</div>
+                  {lastQuiz && (
+                    <div className="bg-black/80 p-4 border-l-4 border-amber-600 shadow-2xl">
+                        <p className="text-[10px] text-amber-500 font-bold mb-1 uppercase tracking-tighter">직전 문제 학습</p>
+                        <p className="text-sm font-bold text-white mb-2 italic">" {lastQuiz.question} "</p>
+                        <p className="text-xs font-black text-amber-400">정답: {lastQuiz.options[lastQuiz.answer]}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : myPlayer?.role === Role.SUPPORT && team ? (
             <div className="space-y-8 pb-32">
@@ -605,6 +641,13 @@ const App: React.FC = () => {
                     </div>
                     <button disabled={!team.isDead} onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'revive', cost:8}})} className={`w-full mt-6 py-6 border-double border-8 font-black text-2xl transition-all ${team.isDead ? 'bg-amber-700 border-amber-200 text-white shadow-2xl animate-bounce' : 'bg-black border-amber-950 opacity-20'}`}>⚡ 부활 시키기 (8P)</button>
                   </section>
+                  {lastQuiz && (
+                    <div className="bg-black/80 p-4 border-l-4 border-amber-600 shadow-2xl mt-4">
+                        <p className="text-[10px] text-amber-500 font-bold mb-1 uppercase tracking-tighter">직전 문제 학습</p>
+                        <p className="text-sm font-bold text-white mb-2 italic">" {lastQuiz.question} "</p>
+                        <p className="text-xs font-black text-amber-400">정답: {lastQuiz.options[lastQuiz.answer]}</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -635,6 +678,13 @@ const App: React.FC = () => {
                     </div>
                 </div>
               </div>
+              {lastQuiz && (
+                <div className="bg-black/80 p-4 border-l-4 border-amber-600 shadow-2xl mt-4 w-full">
+                    <p className="text-[10px] text-amber-500 font-bold mb-1 uppercase tracking-tighter">직전 문제 학습</p>
+                    <p className="text-sm font-bold text-white mb-2 italic">" {lastQuiz.question} "</p>
+                    <p className="text-xs font-black text-amber-400 text-center">정답: {lastQuiz.options[lastQuiz.answer]}</p>
+                </div>
+              )}
             </div>
           )}
         </div>

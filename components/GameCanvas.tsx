@@ -49,6 +49,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
         g.append('ellipse').attr('class', 'shadow').attr('rx', 35).attr('ry', 15).attr('cy', 35).attr('fill', 'black').attr('opacity', 0.3);
         g.append('image').attr('class', 'char-img').attr('x', -40).attr('y', -40).attr('width', 80).attr('height', 80).attr('preserveAspectRatio', 'xMidYMid meet');
         g.append('circle').attr('class', 'selection-ring').attr('r', 45).attr('fill', 'none').attr('stroke-width', 3).attr('stroke-dasharray', '5,5');
+        g.append('circle').attr('class', 'ice-effect').attr('r', 50).attr('fill', 'rgba(173, 216, 230, 0.4)').attr('stroke', '#87ceeb').attr('stroke-width', 2).style('display', 'none');
         const info = g.append('g').attr('class', 'info-ui').attr('transform', 'translate(0, -55)');
         info.append('text').attr('class', 'name').attr('text-anchor', 'middle').attr('fill', 'white').style('font-size', '14px').style('font-weight', '900').style('text-shadow', '0 2px 4px black');
         info.append('rect').attr('class', 'hp-bg').attr('x', -35).attr('y', 5).attr('width', 70).attr('height', 8).attr('fill', '#450a0a').attr('rx', 4);
@@ -64,11 +65,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
         return d.isDead ? 0.2 : 1;
       });
 
+    units.select('.ice-effect').style('display', d => d.activeEffects.some(e => e.type === 'm_ice') ? 'block' : 'none');
+
     units.select('.info-ui').attr('transform', d => `translate(0, -55) rotate(${-d.angle})`);
     units.select('.char-img').attr('xlink:href', d => getImageUrl(d.classType))
       .style('filter', d => {
         if (d.activeEffects.some(e => e.type === 'w_invinc')) return 'drop-shadow(0 0 15px gold) brightness(1.5)';
         if (d.activeEffects.some(e => e.type === 'w_double')) return 'drop-shadow(0 0 10px red) saturate(2)';
+        if (d.activeEffects.some(e => e.type === 'm_ice')) return 'cyan(0.5) brightness(0.8)';
         return 'none';
       });
 
@@ -86,7 +90,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
         const actualRange = d.stats.range * rangeMult;
         
         if (d.classType === ClassType.WARRIOR || d.classType === ClassType.ROGUE) {
-          // Arc visualization: 중심점 이동 및 회전 보정 (전방으로 부채꼴 이펙트 송출)
           const arc = d3.arc().innerRadius(10).outerRadius(actualRange).startAngle(-Math.PI/3).endAngle(Math.PI/3);
           effectLayer.append('path')
             .attr('d', arc as any)
@@ -105,7 +108,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
         if (eff.type === 'm_laser') {
            const endX = d.x + Math.cos(angleRad) * 1000;
            const endY = d.y + Math.sin(angleRad) * 1000;
-           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', 'cyan').attr('stroke-width', 15).attr('opacity', 0.6).transition().duration(100).remove();
+           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', 'cyan').attr('stroke-width', 15).attr('opacity', 0.8).transition().duration(100).remove();
+           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', 'white').attr('stroke-width', 5).attr('opacity', 1).transition().duration(100).remove();
+        }
+        if (eff.type === 'm_ice_trigger') {
+            effectLayer.append('circle').attr('cx', d.x).attr('cy', d.y).attr('r', 5).attr('fill', '#00ffff').transition().duration(200).attr('r', 100).style('opacity', 0).remove();
         }
         if (eff.type === 'a_multi') {
             for (let angleOff = -40; angleOff <= 40; angleOff += 20) {
