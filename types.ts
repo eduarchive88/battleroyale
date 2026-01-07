@@ -30,6 +30,7 @@ export interface Team {
   maxMp: number;
   x: number;
   y: number;
+  angle: number; // 추가: 바라보는 각도 (0~360)
   isDead: boolean;
   classType: ClassType;
   stats: CharacterStats;
@@ -63,4 +64,5 @@ export interface Player {
   role: Role;
   classType: ClassType;
   points: number;
+  hasSubmittedQuiz?: boolean;
 }

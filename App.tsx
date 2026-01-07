@@ -31,16 +31,18 @@ const App: React.FC = () => {
   const timerRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 호스트 전용 타이머 관리
   useEffect(() => {
     if (isHost && gameState.isStarted) {
+      if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = window.setInterval(() => {
         setGameState(prev => {
           const nextTimer = prev.timer - 1;
           if (nextTimer <= 0) {
             const nextPhase = prev.phase === 'QUIZ' ? 'BATTLE' : 'QUIZ';
             const nextQuizIdx = prev.phase === 'BATTLE' ? Math.min(prev.currentQuizIndex + 1, prev.quizzes.length - 1) : prev.currentQuizIndex;
-            const newState: GameState = { ...prev, timer: 30, phase: nextPhase, currentQuizIndex: nextQuizIdx };
+            const newPlayers = { ...prev.players };
+            Object.keys(newPlayers).forEach(k => newPlayers[k].hasSubmittedQuiz = false);
+            const newState: GameState = { ...prev, timer: 30, phase: nextPhase, currentQuizIndex: nextQuizIdx, players: newPlayers };
             network.broadcastState(newState);
             return newState;
           }
@@ -52,41 +54,6 @@ const App: React.FC = () => {
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [isHost, gameState.isStarted]);
-
-  // PC 키보드 조작 핸들러
-  useEffect(() => {
-    if (view !== 'game' || !myPlayer || myPlayer.role !== Role.COMBAT) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (gameState.phase !== 'BATTLE') return;
-      const key = e.key.toLowerCase();
-      let dir = { x: 0, y: 0 };
-      if (key === 'w') dir.y = -1;
-      if (key === 's') dir.y = 1;
-      if (key === 'a') dir.x = -1;
-      if (key === 'd') dir.x = 1;
-
-      if (dir.x !== 0 || dir.y !== 0) {
-        network.sendAction({ type: 'MOVE', payload: { teamId: myPlayer.teamId, dir } });
-      }
-
-      if (key === 'j') network.sendAction({ type: 'ATTACK', payload: { teamId: myPlayer.teamId } });
-      
-      const team = gameState.teams[myPlayer.teamId];
-      if (team && team.unlockedSkills.length > 0) {
-        if (key === 'k' && team.unlockedSkills[0]) network.sendAction({ type: 'SKILL_USE', payload: { teamId: myPlayer.teamId, skId: team.unlockedSkills[0] } });
-        if (key === 'l' && team.unlockedSkills[1]) network.sendAction({ type: 'SKILL_USE', payload: { teamId: myPlayer.teamId, skId: team.unlockedSkills[1] } });
-        if (key === ';' && team.unlockedSkills[2]) network.sendAction({ type: 'SKILL_USE', payload: { teamId: myPlayer.teamId, skId: team.unlockedSkills[2] } });
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [view, myPlayer, gameState.phase, gameState.teams]);
-
-  useEffect(() => {
-    if (gameState.isStarted && view !== 'game') setView('game');
-  }, [gameState.isStarted]);
 
   useEffect(() => {
     if (isHost) network.setActionListener(handleHostAction);
@@ -106,7 +73,7 @@ const App: React.FC = () => {
             newState.teams[player.teamId] = {
               id: player.teamId, name: `${player.teamId} 모둠`, points: 0,
               hp: base.hp, maxHp: base.hp, mp: base.mp, maxMp: base.mp,
-              x: Math.random() * 800 + 100, y: Math.random() * 800 + 100,
+              x: Math.random() * 800 + 100, y: Math.random() * 800 + 100, angle: 0,
               isDead: false, classType: player.classType, stats: { ...base },
               items: { weapon: false, armor: false, boots: false },
               unlockedSkills: [], activeEffects: [], lastAtkTime: 0
@@ -118,17 +85,29 @@ const App: React.FC = () => {
           newState.timer = Math.max(0, newState.timer + payload.amount);
           break;
         }
+        case 'GIVE_POINT': {
+          if (newState.teams[payload.teamId]) newState.teams[payload.teamId].points += payload.amount;
+          break;
+        }
         case 'QUIZ_ANSWER': {
-          if (payload.correct) newState.teams[payload.teamId].points += 10;
-          else newState.teams[payload.teamId].points += 2;
+          const p = newState.players[payload.playerId];
+          if (p && !p.hasSubmittedQuiz) {
+            p.hasSubmittedQuiz = true;
+            if (payload.correct) newState.teams[payload.teamId].points += 10;
+            else newState.teams[payload.teamId].points += 2;
+          }
           break;
         }
         case 'MOVE': {
           const t = newState.teams[payload.teamId];
           if (t && !t.isDead && newState.phase === 'BATTLE') {
-            const speedMult = t.activeEffects.some(e => e.type === 'w_speed') ? 2 : 1;
-            t.x = Math.max(0, Math.min(1000, t.x + payload.dir.x * t.stats.speed * 5 * speedMult));
-            t.y = Math.max(0, Math.min(1000, t.y + payload.dir.y * t.stats.speed * 5 * speedMult));
+            const speedMult = t.activeEffects.some(e => e.type === 'w_speed') ? 1.8 : 1;
+            t.x = Math.max(0, Math.min(1000, t.x + payload.dir.x * t.stats.speed * 4 * speedMult));
+            t.y = Math.max(0, Math.min(1000, t.y + payload.dir.y * t.stats.speed * 4 * speedMult));
+            // 방향에 따른 각도 계산 (라디안 -> 도)
+            if (payload.dir.x !== 0 || payload.dir.y !== 0) {
+              t.angle = Math.atan2(payload.dir.y, payload.dir.x) * (180 / Math.PI);
+            }
           }
           break;
         }
@@ -136,18 +115,33 @@ const App: React.FC = () => {
           const t = newState.teams[payload.teamId];
           if (t && !t.isDead && newState.phase === 'BATTLE') {
             t.lastAtkTime = Date.now();
-            const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 3 : 1;
+            const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 2.5 : 1;
             const atkMult = t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1;
             
-            Object.values(newState.teams).forEach((target: any) => {
+            Object.values(newState.teams).forEach((target: Team) => {
               if (target.id === t.id || target.isDead) return;
-              const dist = Math.sqrt((t.x - target.x)**2 + (t.y - target.y)**2);
-              if (dist < (t.stats.range * rangeMult)) {
-                if (target.activeEffects.some((e: any) => e.type === 'w_invinc')) return;
-                const damage = Math.max(5, (t.stats.atk * atkMult) - target.stats.def);
-                target.hp = Math.max(0, target.hp - damage);
-                if (target.hp <= 0) target.isDead = true;
-                t.points += 2;
+              const dx = target.x - t.x;
+              const dy = target.y - t.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              const maxRange = t.stats.range * rangeMult;
+              
+              if (dist < maxRange) {
+                // 각도 기반 타격 판정 (전사/도적 같은 근접은 각도가 중요)
+                const targetAngle = Math.atan2(dy, dx) * (180 / Math.PI);
+                let angleDiff = Math.abs(t.angle - targetAngle);
+                if (angleDiff > 180) angleDiff = 360 - angleDiff;
+
+                let canHit = true;
+                // 전사는 전방 90도 범위만 타격
+                if (t.classType === ClassType.WARRIOR && angleDiff > 45) canHit = false;
+                
+                if (canHit) {
+                  if (target.activeEffects.some((e: any) => e.type === 'w_invinc')) return;
+                  const damage = Math.max(5, (t.stats.atk * atkMult) - target.stats.def);
+                  target.hp = Math.max(0, target.hp - damage);
+                  if (target.hp <= 0) target.isDead = true;
+                  t.points += 2;
+                }
               }
             });
           }
@@ -161,16 +155,14 @@ const App: React.FC = () => {
             (t.items as any)[payload.item] = true;
             if (payload.item === 'weapon') t.stats.atk += 15;
             if (payload.item === 'armor') t.stats.def += 10;
-            if (payload.item === 'boots') t.stats.speed += 2;
+            if (payload.item === 'boots') t.stats.speed += 1.5;
           } else if (payload.action === 'SKILL') {
             t.unlockedSkills.push(payload.skillId);
           } else if (payload.action === 'STAT') {
-            if (payload.stat === 'hp') t.hp = Math.min(t.maxHp, t.hp + 10);
-            if (payload.stat === 'mp') t.mp = Math.min(t.maxMp, t.mp + 10);
+            if (payload.stat === 'hp') t.hp = Math.min(t.maxHp, t.hp + 20);
+            if (payload.stat === 'mp') t.mp = Math.min(t.maxMp, t.mp + 20);
             if (payload.stat === 'atk') t.stats.atk += 3;
-            if (payload.stat === 'speed') t.stats.speed += 0.5;
-            if (payload.stat === 'atkSpeed') t.stats.atkSpeed += 0.2;
-            if (payload.stat === 'def') t.stats.def += 2;
+            if (payload.stat === 'def') t.stats.def += 3;
           }
           break;
         }
@@ -179,13 +171,12 @@ const App: React.FC = () => {
           const skill = SKILLS_INFO[t.classType].find(s => s.id === payload.skId);
           if (t && skill && t.mp >= skill.mp && !t.isDead) {
             t.mp -= skill.mp;
-            t.activeEffects.push({ type: skill.id, until: Date.now() + 2000 });
-            // 즉시 효과 발동류 스킬 처리
+            t.activeEffects.push({ type: skill.id, until: Date.now() + 2500 });
             if (skill.id === 'r_tele') {
               const others = Object.values(newState.teams).filter(ot => ot.id !== t.id && !ot.isDead);
               if (others.length > 0) {
                 const target = others[Math.floor(Math.random() * others.length)];
-                t.x = target.x - 30; t.y = target.y - 30;
+                t.x = target.x - 40; t.y = target.y - 40;
               }
             }
           }
@@ -216,7 +207,6 @@ const App: React.FC = () => {
     });
   };
 
-  // --- 기존 UI 유지 섹션 ---
   if (view === 'landing') {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-[#020617] text-white">
@@ -305,7 +295,6 @@ const App: React.FC = () => {
   }
 
   if (view === 'host_lobby') {
-    // Fix: Type casting to handle unknown properties
     const players = Object.values(gameState.players) as Player[];
     return (
       <div className="h-screen bg-[#020617] text-white flex flex-col p-10">
@@ -343,7 +332,6 @@ const App: React.FC = () => {
   }
 
   if (view === 'lobby') {
-    // Fix: Type casting to handle unknown properties
     const players = Object.values(gameState.players) as Player[];
     return (
       <div className="h-screen bg-[#020617] text-white flex flex-col p-6 overflow-hidden">
@@ -390,7 +378,7 @@ const App: React.FC = () => {
           <div className="fixed bottom-0 left-0 right-0 p-8 bg-gradient-to-t from-[#020617] to-transparent flex justify-center">
             <button disabled={!pendingSelection} onClick={() => {
               if (!pendingSelection) return;
-              const p: Player = { id: userName, name: userName, teamId: pendingSelection.teamId, role: pendingSelection.role, classType: pendingSelection.classType || ClassType.WARRIOR, points: 0 };
+              const p: Player = { id: userName, name: userName, teamId: pendingSelection.teamId, role: pendingSelection.role, classType: pendingSelection.classType || ClassType.WARRIOR, points: 0, hasSubmittedQuiz: false };
               setMyPlayer(p);
               network.sendAction({ type: 'CONFIRM_SELECTION', payload: { player: p } });
             }} className="w-full max-w-md py-6 rounded-[2.5rem] font-black text-3xl bg-blue-600 shadow-2xl">선택 완료</button>
@@ -404,66 +392,81 @@ const App: React.FC = () => {
     const isTeacher = isHost;
     const team = myPlayer ? gameState.teams[myPlayer.teamId] : null;
     const currentQuiz = gameState.quizzes[gameState.currentQuizIndex] || { question: "준비된 퀴즈가 없습니다.", options: ["-"], answer: 0 };
+    const phaseColor = gameState.phase === 'QUIZ' ? 'bg-[#1e1b4b]' : 'bg-[#0f172a]';
+    const accentColor = gameState.phase === 'QUIZ' ? 'border-violet-500/50' : 'border-red-500/50';
 
     return (
-      <div className="fixed inset-0 bg-black flex flex-col md:flex-row overflow-hidden">
-        <div className="flex-1 relative bg-slate-900">
+      <div className={`fixed inset-0 ${phaseColor} flex flex-col md:flex-row overflow-hidden transition-colors duration-700`}>
+        {/* 중앙 전장 영역 */}
+        <div className={`flex-1 relative ${gameState.phase === 'QUIZ' ? 'opacity-40 grayscale-[0.5]' : ''} transition-all duration-700`}>
            <GameCanvas teams={gameState.teams} myTeamId={myPlayer?.teamId} />
            
-           <div className="absolute top-10 left-1/2 -translate-x-1/2 text-center pointer-events-none">
-              <div className="bg-black/80 px-10 py-4 rounded-3xl border-2 border-blue-500 shadow-2xl">
-                <p className="text-blue-400 font-black text-xs uppercase tracking-widest">{gameState.phase} PHASE</p>
-                <p className="text-5xl font-mono font-black">{gameState.timer}s</p>
+           <div className="absolute top-10 left-1/2 -translate-x-1/2 flex items-center gap-6 pointer-events-none">
+              <div className={`bg-black/90 px-12 py-5 rounded-[2.5rem] border-4 ${accentColor} shadow-2xl backdrop-blur-md text-center`}>
+                <p className={`${gameState.phase === 'QUIZ' ? 'text-violet-400' : 'text-red-400'} font-black text-sm tracking-[0.3em] uppercase mb-1`}>{gameState.phase} PHASE</p>
+                <p className="text-6xl font-mono font-black text-white">{gameState.timer}s</p>
               </div>
            </div>
 
            {isTeacher && (
-             <div className="absolute top-10 right-10 flex flex-col gap-2">
-               <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:5}})} className="bg-emerald-600 px-4 py-2 rounded-lg font-bold text-xs">+5초</button>
-               <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:-5}})} className="bg-red-600 px-4 py-2 rounded-lg font-bold text-xs">-5초</button>
+             <div className="absolute top-10 right-10 flex flex-col gap-3">
+               <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:10}})} className="bg-emerald-600/80 hover:bg-emerald-500 px-6 py-3 rounded-2xl font-black text-sm shadow-xl">+10s</button>
+               <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:-10}})} className="bg-rose-600/80 hover:bg-rose-500 px-6 py-3 rounded-2xl font-black text-sm shadow-xl">-10s</button>
              </div>
            )}
 
            {myPlayer?.role === Role.COMBAT && gameState.phase === 'BATTLE' && team && !team.isDead && (
              <>
-               <div className="absolute bottom-10 left-10 scale-125"><Joystick onMove={(dir)=>network.sendAction({type:'MOVE', payload:{teamId:myPlayer.teamId, dir}})} /></div>
-               <div className="absolute bottom-10 right-10 flex gap-4 items-end">
-                  <div className="grid grid-cols-1 gap-2">
+               <div className="absolute bottom-12 left-12 scale-150"><Joystick onMove={(dir)=>network.sendAction({type:'MOVE', payload:{teamId:myPlayer.teamId, dir}})} /></div>
+               <div className="absolute bottom-12 right-12 flex gap-6 items-end">
+                  <div className="flex flex-col gap-4">
                     {team.unlockedSkills.map((skId, i) => {
                       const sk = SKILLS_INFO[team.classType].find(s => s.id === skId);
+                      const effect = team.activeEffects.find(e => e.type === skId);
+                      const timeLeft = effect ? Math.max(0, Math.ceil((effect.until - Date.now()) / 1000)) : 0;
                       return (
-                        <button key={i} onClick={()=>network.sendAction({type:'SKILL_USE', payload:{teamId:myPlayer.teamId, skId}})} className="px-4 py-2 bg-blue-600 rounded-xl font-bold text-xs border-2 border-white/20">{sk?.name} ({sk?.mp}M)</button>
+                        <button key={i} onClick={()=>network.sendAction({type:'SKILL_USE', payload:{teamId:myPlayer.teamId, skId}})} className={`relative px-6 py-3 rounded-2xl font-black text-xs border-2 transition-all ${timeLeft > 0 ? 'bg-amber-600 border-white scale-110' : 'bg-blue-600 border-white/20'}`}>
+                          {sk?.name} {timeLeft > 0 ? `(${timeLeft}s)` : `(${sk?.mp}M)`}
+                        </button>
                       );
                     })}
                   </div>
-                  <button onClick={()=>network.sendAction({type:'ATTACK', payload:{teamId:myPlayer.teamId}})} className="w-32 h-32 bg-red-600 rounded-full font-black text-5xl shadow-2xl border-4 border-white/20 active:scale-95">⚔️</button>
+                  <button onClick={()=>network.sendAction({type:'ATTACK', payload:{teamId:myPlayer.teamId}})} className="w-40 h-40 bg-red-600 hover:bg-red-500 rounded-full font-black text-6xl shadow-[0_0_50px_rgba(239,68,68,0.4)] border-8 border-white/20 active:scale-90 transition-all">⚔️</button>
                </div>
              </>
            )}
         </div>
 
-        <div className="w-full md:w-96 bg-slate-950 border-l border-white/10 p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar">
-           {myPlayer?.role === Role.QUIZ && (
+        <div className={`w-full md:w-96 ${gameState.phase === 'QUIZ' ? 'bg-[#2e1065]' : 'bg-slate-950'} border-l-4 ${accentColor} p-6 flex flex-col gap-6 overflow-y-auto custom-scrollbar transition-colors duration-700`}>
+           {isTeacher && (
              <div className="space-y-6">
-                <h3 className="text-2xl font-black text-blue-400 italic">TEAM REPORT</h3>
+                <h3 className="text-2xl font-black text-white italic border-b-2 border-white/10 pb-2">HOST DASHBOARD</h3>
                 {gameState.phase === 'QUIZ' ? (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-slate-900 rounded-xl font-bold border border-white/5">{currentQuiz.question}</div>
-                    {currentQuiz.options.map((opt, i) => (
-                      <button key={i} onClick={()=>network.sendAction({type:'QUIZ_ANSWER', payload:{teamId:myPlayer.teamId, correct: i===currentQuiz.answer}})} className="w-full p-4 bg-slate-800 hover:bg-blue-600 rounded-xl text-left font-bold text-sm transition-all">{i+1}. {opt}</button>
-                    ))}
+                  <div className="bg-black/30 p-6 rounded-[2.5rem] border border-violet-400/30">
+                    <p className="text-violet-300 font-bold text-xs uppercase mb-4 tracking-tighter">Current Quiz</p>
+                    <p className="text-xl font-black leading-tight text-white mb-6">"{currentQuiz.question}"</p>
+                    <div className="space-y-2">
+                       {currentQuiz.options.map((o, idx) => (
+                         <div key={idx} className={`p-3 rounded-xl text-xs font-bold ${idx === currentQuiz.answer ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' : 'bg-white/5 text-white/50'}`}>
+                           {idx + 1}. {o}
+                         </div>
+                       ))}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <p className="text-xs text-slate-500 font-black uppercase">전술 현황 브리핑</p>
+                    <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Team Live Stats</p>
                     {(Object.values(gameState.teams) as Team[]).map(t => (
-                      <div key={t.id} className={`p-4 rounded-xl border ${t.id === myPlayer.teamId ? 'border-blue-500 bg-blue-500/10' : 'bg-slate-900 border-white/5'}`}>
-                        <div className="flex justify-between font-black mb-2"><span>{t.name}</span><span className={t.isDead ? 'text-red-500' : 'text-emerald-500'}>{t.isDead ? 'DOWN' : 'ACTIVE'}</span></div>
-                        <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
-                          <div className="flex justify-between"><span>HP</span><span>{t.hp}/{t.maxHp}</span></div>
-                          <div className="flex justify-between"><span>MP</span><span>{t.mp}/{t.maxMp}</span></div>
-                          <div className="flex justify-between"><span>ATK</span><span>{t.stats.atk}</span></div>
-                          <div className="flex justify-between"><span>SKILLS</span><span>{t.unlockedSkills.length}</span></div>
+                      <div key={t.id} className="p-4 bg-black/40 rounded-3xl border border-white/10">
+                        <div className="flex justify-between items-center mb-3">
+                           <span className="font-black text-sm">{t.name}</span>
+                           <div className="flex gap-1">
+                              <button onClick={()=>network.sendAction({type:'GIVE_POINT', payload:{teamId:t.id, amount:5}})} className="bg-amber-500 text-black px-2 py-1 rounded-lg text-[10px] font-black">+5P</button>
+                           </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-bold text-slate-400">
+                           <div className="flex justify-between"><span>HP</span><span className="text-red-400">{t.hp}</span></div>
+                           <div className="flex justify-between"><span>MP</span><span className="text-blue-400">{t.mp}</span></div>
                         </div>
                       </div>
                     ))}
@@ -472,76 +475,87 @@ const App: React.FC = () => {
              </div>
            )}
 
-           {myPlayer?.role === Role.SUPPORT && team && (
+           {!isTeacher && myPlayer && (
              <div className="space-y-6">
-                <div className="flex justify-between items-center bg-slate-900 p-4 rounded-2xl border border-white/5">
-                   <h3 className="text-xl font-black text-emerald-400">SUPPORT SHOP</h3>
-                   <span className="bg-amber-500 text-black px-4 py-1 rounded-full font-black italic">{team.points} P</span>
-                </div>
-                
-                <section className="space-y-3">
-                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">장비 세트 (4P - 1회 한정)</p>
-                   <div className="grid grid-cols-1 gap-2">
-                      <button disabled={team.items.weapon} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'weapon', cost:COSTS.ITEM}})} className="p-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 rounded-xl text-xs font-bold flex justify-between"><span>⚔️ 전설의 무기 (+ATK)</span><span>4P</span></button>
-                      <button disabled={team.items.armor} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'armor', cost:COSTS.ITEM}})} className="p-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 rounded-xl text-xs font-bold flex justify-between"><span>🛡️ 신성한 방어구 (+DEF)</span><span>4P</span></button>
-                      <button disabled={team.items.boots} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'boots', cost:COSTS.ITEM}})} className="p-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 rounded-xl text-xs font-bold flex justify-between"><span>👟 바람의 장화 (+SPD)</span><span>4P</span></button>
-                   </div>
-                </section>
-
-                <section className="space-y-3">
-                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">기술 습득 (6P - 1회 한정)</p>
-                   <div className="space-y-2">
-                      {SKILLS_INFO[team.classType].map(sk => (
-                        <button key={sk.id} disabled={team.unlockedSkills.includes(sk.id)} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'SKILL', skillId:sk.id, cost:COSTS.SKILL}})} className="w-full p-4 bg-slate-800 hover:bg-blue-900 disabled:opacity-30 rounded-xl text-left border border-white/5">
-                          <div className="flex justify-between items-center"><span className="font-black text-sm">{sk.name}</span><span className="text-[10px] font-black bg-white/10 px-2 rounded">6P</span></div>
-                          <p className="text-[10px] text-slate-400 mt-1">{sk.desc} (소모 MP: {sk.mp})</p>
-                        </button>
-                      ))}
-                   </div>
-                </section>
-
-                <section className="space-y-3">
-                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">무제한 능력치 강화 (3P)</p>
-                   <div className="grid grid-cols-2 gap-2">
-                      <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'hp', cost:COSTS.STAT}})} className="p-3 bg-slate-900 rounded-xl text-xs font-bold">❤️ 체력회복</button>
-                      <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'mp', cost:COSTS.STAT}})} className="p-3 bg-slate-900 rounded-xl text-xs font-bold">💧 마력회복</button>
-                      <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'atk', cost:COSTS.STAT}})} className="p-3 bg-slate-900 rounded-xl text-xs font-bold">💥 공격력↑</button>
-                      <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'def', cost:COSTS.STAT}})} className="p-3 bg-slate-900 rounded-xl text-xs font-bold">🛡️ 방어력↑</button>
-                   </div>
-                </section>
-             </div>
-           )}
-
-           {myPlayer?.role === Role.COMBAT && (
-             <div className="space-y-6">
-                <h3 className="text-2xl font-black text-red-500 italic">COMBAT STATUS</h3>
-                <div className="p-8 bg-slate-900 rounded-[3rem] text-center border-2 border-white/5 relative overflow-hidden">
-                   <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/20" />
-                   <div className="text-9xl mb-4">{team?.classType === ClassType.WARRIOR ? '🛡️' : team?.classType === ClassType.MAGE ? '🔮' : team?.classType === ClassType.ARCHER ? '🏹' : '🗡️'}</div>
-                   <p className="font-black uppercase tracking-[0.3em] text-blue-400">{team?.classType}</p>
-                </div>
-                <div className="space-y-3 bg-black/40 p-6 rounded-3xl">
-                   <div className="flex justify-between items-center text-xs font-bold">
-                      <span className="text-slate-500">HP</span>
-                      <div className="w-32 h-3 bg-slate-800 rounded-full overflow-hidden border border-white/5">
-                        <div className="h-full bg-red-500 transition-all" style={{width: `${(team?.hp||0)/(team?.maxHp||1)*100}%`}} />
+                {myPlayer.role === Role.QUIZ && (
+                  <div className="space-y-6">
+                    <h3 className="text-2xl font-black text-violet-300 italic">KNOWLEDGE BRAIN</h3>
+                    {gameState.phase === 'QUIZ' ? (
+                      gameState.players[myPlayer.id].hasSubmittedQuiz ? (
+                        <div className="p-10 bg-black/30 rounded-[3rem] border border-white/5 text-center animate-pulse">
+                          <p className="text-4xl mb-4">✅</p>
+                          <p className="font-bold text-sm text-slate-400">답안 제출 완료!<br/>다음 라운드를 대기하세요.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="p-6 bg-slate-900 rounded-[2.5rem] font-bold border-2 border-violet-500 shadow-xl">{currentQuiz.question}</div>
+                          {currentQuiz.options.map((opt, i) => (
+                            <button key={i} onClick={()=>network.sendAction({type:'QUIZ_ANSWER', payload:{playerId:myPlayer.id, teamId:myPlayer.teamId, correct: i===currentQuiz.answer}})} className="w-full p-5 bg-violet-600 hover:bg-violet-500 rounded-2xl text-left font-black text-sm transition-all transform hover:scale-105 active:scale-95 shadow-lg">
+                              <span className="bg-white/20 px-2 py-1 rounded mr-3">{i+1}</span> {opt}
+                            </button>
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      <div className="p-8 bg-black/40 rounded-[2.5rem] border border-white/5 text-center">
+                        <p className="text-5xl mb-4">🛡️</p>
+                        <p className="font-black text-sm text-slate-500">전투 단계입니다.</p>
                       </div>
-                   </div>
-                   <div className="flex justify-between items-center text-xs font-bold">
-                      <span className="text-slate-500">MP</span>
-                      <div className="w-32 h-3 bg-slate-800 rounded-full overflow-hidden border border-white/5">
-                        <div className="h-full bg-blue-500 transition-all" style={{width: `${(team?.mp||0)/(team?.maxMp||1)*100}%`}} />
+                    )}
+                  </div>
+                )}
+
+                {myPlayer.role === Role.SUPPORT && team && (
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-center bg-black/30 p-5 rounded-[2rem] border-2 border-emerald-500/30">
+                       <h3 className="text-xl font-black text-emerald-400">SUPPORTER</h3>
+                       <span className="bg-amber-500 text-black px-4 py-1 rounded-full font-black italic shadow-lg">{team.points} P</span>
+                    </div>
+                    {gameState.phase === 'BATTLE' ? (
+                      <div className="space-y-6">
+                         <section className="space-y-3">
+                           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Gear Upgrade (4P)</p>
+                           <div className="grid grid-cols-1 gap-2">
+                              <button disabled={team.items.weapon} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'weapon', cost:COSTS.ITEM}})} className="p-4 bg-slate-900 hover:bg-emerald-900/50 disabled:opacity-20 rounded-2xl text-xs font-bold border border-white/5 flex justify-between"><span>⚔️ 전설의 무기 (+ATK)</span><span>4P</span></button>
+                              <button disabled={team.items.armor} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'armor', cost:COSTS.ITEM}})} className="p-4 bg-slate-900 hover:bg-emerald-900/50 disabled:opacity-20 rounded-2xl text-xs font-bold border border-white/5 flex justify-between"><span>🛡️ 신성한 갑옷 (+DEF)</span><span>4P</span></button>
+                           </div>
+                         </section>
+                         <section className="space-y-3">
+                           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Skill Unlock (6P)</p>
+                           <div className="space-y-2">
+                              {SKILLS_INFO[team.classType].map(sk => (
+                                <button key={sk.id} disabled={team.unlockedSkills.includes(sk.id)} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'SKILL', skillId:sk.id, cost:COSTS.SKILL}})} className="w-full p-4 bg-slate-900 hover:bg-blue-900/50 disabled:opacity-20 rounded-2xl text-left border border-white/10 group">
+                                  <div className="flex justify-between items-center mb-1"><span className="font-black text-xs text-white group-hover:text-blue-400">{sk.name}</span><span className="text-[10px] font-black bg-white/10 px-2 rounded">6P</span></div>
+                                  <p className="text-[10px] text-slate-500 leading-tight">{sk.desc}</p>
+                                </button>
+                              ))}
+                           </div>
+                         </section>
+                         <section className="space-y-3">
+                           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Direct Buff (3P)</p>
+                           <div className="grid grid-cols-2 gap-2">
+                              <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'hp', cost:COSTS.STAT}})} className="p-3 bg-rose-900/20 hover:bg-rose-900/40 rounded-xl text-[10px] font-black border border-rose-500/20">❤️ HP 회복</button>
+                              <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'mp', cost:COSTS.STAT}})} className="p-3 bg-blue-900/20 hover:bg-blue-900/40 rounded-xl text-[10px] font-black border border-blue-500/20">💧 MP 회복</button>
+                           </div>
+                         </section>
                       </div>
-                   </div>
-                   <hr className="border-white/5 my-2" />
-                   <div className="flex justify-between text-xs font-bold uppercase tracking-widest"><span className="text-slate-500">Attack</span><span>{team?.stats.atk}</span></div>
-                   <div className="flex justify-between text-xs font-bold uppercase tracking-widest"><span className="text-slate-500">Defense</span><span>{team?.stats.def}</span></div>
-                   <div className="flex justify-between text-xs font-bold uppercase tracking-widest"><span className="text-slate-500">Speed</span><span>{team?.stats.speed}</span></div>
-                </div>
-                <div className="p-4 bg-white/5 rounded-xl border border-white/5 text-[10px] text-slate-500 font-bold leading-relaxed">
-                   [조작 가이드]<br/>
-                   WASD: 이동 | J: 공격 | K,L,;: 기술 사용
-                </div>
+                    ) : (
+                      <div className="p-8 bg-black/30 rounded-[3rem] border border-white/5 text-center">
+                        <p className="font-bold text-sm text-slate-500">준비 단계입니다.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {myPlayer.role === Role.COMBAT && (
+                  <div className="space-y-6">
+                    <h3 className="text-2xl font-black text-red-500 italic">WARRIOR STATUS</h3>
+                    <div className="p-10 bg-black/40 rounded-[3.5rem] text-center border-4 border-white/5 relative shadow-inner">
+                       <div className="text-9xl mb-4 animate-bounce">{team?.classType === ClassType.WARRIOR ? '🛡️' : team?.classType === ClassType.MAGE ? '🔮' : team?.classType === ClassType.ARCHER ? '🏹' : '🗡️'}</div>
+                       <p className="font-black uppercase tracking-[0.5em] text-blue-400 text-xl">{team?.classType}</p>
+                    </div>
+                  </div>
+                )}
              </div>
            )}
         </div>
