@@ -100,16 +100,19 @@ const App: React.FC = () => {
   };
 
   const createRoom = () => {
-    const finalCode = (customCode.trim() || Math.random().toString(36).substring(2, 7)).toUpperCase();
+    const codeInput = customCode.trim();
+    if (!codeInput) return alert("방 코드를 입력해주세요.");
+    
+    const finalCode = codeInput.toUpperCase();
     setIsConnecting(true);
     
-    // 네트워크 초기화 시도
+    // 네트워크 초기화
     network.init(
       finalCode, 
       true, 
       (state) => setGameState(state),
       () => {
-        // Peer가 정상적으로 Open 되었을 때만 화면 전환 및 로딩 해제
+        // Peer 오픈 성공 시 실행
         setIsHost(true);
         setIsConnecting(false);
         setRoomCode(finalCode);
@@ -127,17 +130,37 @@ const App: React.FC = () => {
         setView('host_lobby');
       }
     );
+
+    // 10초 이상 응답 없으면 로딩 강제 해제
+    setTimeout(() => {
+      if (isConnecting) {
+        setIsConnecting(false);
+        alert("방 생성 서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.");
+      }
+    }, 10000);
   };
 
   const joinRoom = () => {
     const targetCode = roomCode.trim().toUpperCase();
     if (!targetCode || !userName) return alert("닉네임과 방 코드를 입력하세요.");
     setIsConnecting(true);
+    
     network.init(targetCode, false, (state) => {
-      setGameState(state);
-      setIsConnecting(false);
-      if (state.roomCode) setView('lobby');
+      // 상태 데이터가 들어오면 성공으로 간주
+      if (state && state.roomCode) {
+        setGameState(state);
+        setIsConnecting(false);
+        setView('lobby');
+      }
     });
+
+    // 입장 타임아웃
+    setTimeout(() => {
+      if (isConnecting && view === 'landing') {
+        setIsConnecting(false);
+        alert("방에 연결할 수 없습니다. 코드를 확인하거나 교사가 방을 먼저 만들었는지 확인하세요.");
+      }
+    }, 8000);
   };
 
   const confirmSelection = () => {
@@ -163,7 +186,7 @@ const App: React.FC = () => {
             <input className="w-full p-5 bg-slate-800 border border-slate-700 rounded-2xl text-white outline-none focus:ring-2 ring-blue-500 font-bold" placeholder="영웅 닉네임" value={userName} onChange={e => setUserName(e.target.value)} />
             <input className="w-full p-5 bg-slate-800 border border-slate-700 rounded-2xl text-white outline-none focus:ring-2 ring-blue-500 uppercase font-black" placeholder="방 코드" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
             <button onClick={joinRoom} disabled={isConnecting} className={`w-full py-5 bg-blue-600 hover:bg-blue-500 rounded-2xl font-black text-2xl transition-all ${isConnecting ? 'opacity-50 cursor-wait' : 'active:scale-95'}`}>
-              {isConnecting ? '접속 중...' : '입장하기'}
+              {isConnecting ? '연결 시도 중...' : '입장하기'}
             </button>
           </div>
           <button onClick={() => setView('host_setup')} className="w-full py-4 bg-slate-800/50 hover:bg-slate-800 rounded-2xl font-bold text-slate-500 hover:text-white transition-colors">교사용 전장 설계 (Host)</button>
@@ -212,12 +235,12 @@ const App: React.FC = () => {
                  };
                  reader.readAsText(file);
               }} />
-              <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded-2xl font-bold">파일 선택</button>
+              <button onClick={() => fileInputRef.current?.click()} className="w-full py-4 bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded-2xl font-bold">파일 선택 (.csv)</button>
             </div>
           </div>
           <div className="col-span-7 space-y-8">
             <div className="bg-slate-950 p-8 rounded-[3rem] border border-white/5 h-[400px] overflow-y-auto custom-scrollbar">
-               <h3 className="text-xl font-black mb-6">등록된 퀴즈 ({quizList.length})</h3>
+               <h3 className="text-xl font-black mb-6">등록된 퀴즈 리스트 ({quizList.length})</h3>
                {quizList.map((q, i) => (
                  <div key={i} className="p-5 bg-white/5 rounded-2xl mb-3 flex justify-between items-center border border-white/5">
                    <span className="font-bold">{i+1}. {q.question}</span>
@@ -226,9 +249,9 @@ const App: React.FC = () => {
                ))}
             </div>
             <div className="flex gap-4">
-               <input className="flex-1 p-4 bg-slate-900 border border-white/10 rounded-2xl text-center text-2xl font-black uppercase outline-none focus:ring-2 ring-blue-500" placeholder="방 코드 설정" value={customCode} onChange={e => setCustomCode(e.target.value)} />
-               <button onClick={createRoom} disabled={isConnecting} className={`px-10 py-6 bg-blue-600 rounded-2xl font-black text-2xl shadow-xl transition-all ${isConnecting ? 'opacity-50 cursor-wait' : 'hover:bg-blue-500'}`}>
-                 {isConnecting ? '전장 생성 중...' : '전장 생성'}
+               <input className="flex-1 p-4 bg-slate-900 border border-white/10 rounded-2xl text-center text-2xl font-black uppercase outline-none focus:ring-2 ring-blue-500" placeholder="방 코드 설정 (예: KOREA1)" value={customCode} onChange={e => setCustomCode(e.target.value)} />
+               <button onClick={createRoom} disabled={isConnecting} className={`px-10 py-6 bg-blue-600 rounded-2xl font-black text-2xl shadow-xl transition-all ${isConnecting ? 'opacity-50 cursor-wait' : 'hover:bg-blue-500 active:scale-95'}`}>
+                 {isConnecting ? '서버 등록 중...' : '전장 생성'}
                </button>
             </div>
           </div>
@@ -237,6 +260,7 @@ const App: React.FC = () => {
     );
   }
 
+  // Lobby/Game 뷰는 이전과 동일 (데이터 기반 렌더링)
   if (view === 'host_lobby') {
     const players = Object.values(gameState.players) as Player[];
     return (
@@ -247,7 +271,7 @@ const App: React.FC = () => {
             <h2 className="text-7xl font-mono font-black">{gameState.roomCode}</h2>
           </div>
           <div className="flex flex-col items-end gap-3">
-             <p className="text-slate-500 font-bold">참여 인원: {players.length}명</p>
+             <p className="text-slate-500 font-bold">접속 중인 영웅: {players.length}명</p>
              <button onClick={() => {
                 const ns = { ...gameState, isStarted: true };
                 setGameState(ns);
@@ -262,8 +286,8 @@ const App: React.FC = () => {
               <div key={tId} className={`bg-slate-900/80 p-6 rounded-[2.5rem] border transition-all ${teamPlayers.length > 0 ? 'border-blue-500/50 shadow-xl' : 'border-white/5 opacity-50'}`}>
                 <h3 className="text-2xl font-black italic border-b border-white/10 pb-2 mb-4">{tId} 모둠</h3>
                 <div className="space-y-2 text-sm text-slate-400">
-                  {teamPlayers.length === 0 ? '대기 중...' : teamPlayers.map(p => (
-                    <div key={p.id} className="flex justify-between bg-white/5 p-2 rounded-lg">
+                  {teamPlayers.length === 0 ? '영웅 대기 중...' : teamPlayers.map(p => (
+                    <div key={p.id} className="flex justify-between bg-white/5 p-2 rounded-lg border border-white/5">
                       <span>{p.name}</span>
                       <span className="text-blue-400 font-bold text-xs">{p.role}</span>
                     </div>
@@ -281,7 +305,7 @@ const App: React.FC = () => {
     const players = Object.values(gameState.players) as Player[];
     return (
       <div className="h-screen bg-[#020617] text-white flex flex-col p-6 overflow-hidden">
-        <h2 className="text-5xl font-black italic text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-white">모둠 및 역할 선택</h2>
+        <h2 className="text-5xl font-black italic text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-white">모둠 및 클래스 선택</h2>
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pb-32">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(tId => {
@@ -293,7 +317,7 @@ const App: React.FC = () => {
 
               return (
                 <div key={tId} className={`p-8 rounded-[3.5rem] border-2 transition-all ${isMyTeam ? 'bg-blue-600/20 border-blue-500 shadow-2xl' : 'bg-slate-900 border-white/5'}`}>
-                  <h3 className="text-3xl font-black mb-6 italic">{tId} 모둠</h3>
+                  <h3 className="text-3xl font-black mb-6 italic">{tId} Team</h3>
                   <div className="space-y-3">
                     <button disabled={quizTaken || !!myPlayer} onClick={() => setPendingSelection({ teamId: tId.toString(), role: Role.QUIZ })} className={`w-full p-4 rounded-2xl text-left font-black flex justify-between transition-all ${pendingSelection?.teamId === tId.toString() && pendingSelection?.role === Role.QUIZ ? 'ring-4 ring-white bg-blue-600' : quizTaken ? 'bg-slate-950 opacity-40 grayscale' : 'bg-slate-800 hover:bg-slate-700'}`}>
                       <span>🧠 문제풀이</span><span className="text-xs">{quizTaken ? '점유됨' : '선택'}</span>
@@ -302,7 +326,7 @@ const App: React.FC = () => {
                       <span>🛡️ 서포터 ({supporters}/2)</span><span className="text-xs">{supporters >= 2 ? '점유됨' : '선택'}</span>
                     </button>
                     <div className="pt-4 border-t border-white/10 mt-2">
-                       <p className="text-[10px] font-black text-slate-500 uppercase mb-3">전투원 클래스</p>
+                       <p className="text-[10px] font-black text-slate-500 uppercase mb-3">Combatant Class</p>
                        <div className="grid grid-cols-2 gap-2">
                           {[ClassType.WARRIOR, ClassType.MAGE, ClassType.ARCHER, ClassType.ROGUE].map(ct => {
                             const isPending = pendingSelection?.teamId === tId.toString() && pendingSelection?.classType === ct;
@@ -325,24 +349,26 @@ const App: React.FC = () => {
             <button disabled={!pendingSelection} onClick={confirmSelection} className={`w-full max-w-md py-6 rounded-[2.5rem] font-black text-3xl shadow-2xl transition-all ${pendingSelection ? 'bg-blue-600 animate-bounce' : 'bg-slate-800 opacity-50 grayscale cursor-not-allowed'}`}>선택 완료</button>
           </div>
         )}
+        {myPlayer && <div className="fixed bottom-12 left-0 right-0 text-center font-black text-blue-400 animate-pulse text-2xl italic">교사가 전투를 시작하길 기다리는 중...</div>}
       </div>
     );
   }
 
+  // Game UI ...
   if (view === 'game' && myPlayer) {
     const team = gameState.teams[myPlayer.teamId];
-    if (!team) return <div className="h-screen bg-black flex items-center justify-center font-black text-4xl animate-pulse">전장 데이터 동기화 중...</div>;
+    if (!team) return <div className="h-screen bg-black flex items-center justify-center font-black text-4xl animate-pulse">데이터 동기화 중...</div>;
     const phase = gameState.phase || 'QUIZ';
     const currentQuiz = gameState.quizzes[gameState.currentQuizIndex] || { question: '문제가 없습니다.', options: ['대기'], answer: 0 };
 
     return (
       <div className="fixed inset-0 bg-[#020617] flex flex-col md:flex-row overflow-hidden select-none">
-        <div className="flex-1 relative">
+        <div className="flex-1 relative order-1 md:order-none">
           <GameCanvas teams={gameState.teams} myTeamId={myPlayer.teamId} />
-          <div className="absolute top-8 left-8 flex gap-6">
-            <div className="bg-slate-900/90 p-8 rounded-[2.5rem] border-2 border-white/10 shadow-2xl backdrop-blur-md">
+          <div className="absolute top-8 left-8 flex gap-6 pointer-events-none">
+            <div className="bg-slate-900/90 p-8 rounded-[2.5rem] border-2 border-white/10 pointer-events-auto shadow-2xl backdrop-blur-md">
               <div className="flex items-center gap-6">
-                <div>
+                <div className="text-center">
                    <p className="text-xs text-blue-400 font-black uppercase mb-1">{team.name}</p>
                    <h4 className="text-3xl font-black italic">{team.hp > 0 ? 'ACTIVE' : 'DOWN'}</h4>
                 </div>
@@ -351,7 +377,7 @@ const App: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="bg-amber-500 px-10 py-6 rounded-[2.5rem] text-black font-black text-4xl italic shadow-2xl flex items-center">{team.points} P</div>
+            <div className="bg-amber-500 px-10 py-6 rounded-[2.5rem] text-black font-black text-4xl italic pointer-events-auto shadow-2xl">{team.points} P</div>
           </div>
           {myPlayer.role === Role.COMBAT && phase === 'BATTLE' && !team.isDead && (
             <>
@@ -362,7 +388,7 @@ const App: React.FC = () => {
             </>
           )}
         </div>
-        <div className="w-full md:w-96 bg-slate-900/95 border-l-4 border-blue-500/20 p-10 flex flex-col gap-10 shadow-2xl backdrop-blur-2xl">
+        <div className="w-full md:w-96 bg-slate-900/95 border-l-4 border-blue-500/20 p-10 flex flex-col gap-10 order-2 md:order-none shadow-2xl backdrop-blur-2xl">
            <header><p className="text-sm text-blue-500 font-black tracking-widest uppercase mb-1">{myPlayer.role}</p><h3 className="text-5xl font-black italic tracking-tighter">{team.name}</h3></header>
            <div className="flex-1 overflow-y-auto custom-scrollbar">
              {myPlayer.role === Role.QUIZ && phase === 'QUIZ' && (
@@ -377,8 +403,8 @@ const App: React.FC = () => {
              )}
              {myPlayer.role === Role.SUPPORT && (
                <div className="space-y-4">
-                 <button onClick={() => {/* Upgrade */}} className="w-full p-6 bg-red-900/20 border border-red-500/20 rounded-[2rem] flex justify-between items-center hover:bg-red-600 transition-all"><span className="text-3xl">⚔️</span><div className="font-black">공격 강화</div><span className="font-black">10P</span></button>
-                 <button onClick={() => {/* Heal */}} className="w-full p-6 bg-emerald-900/20 border border-emerald-500/20 rounded-[2rem] flex justify-between items-center hover:bg-emerald-600 transition-all"><span className="text-3xl">❤️</span><div className="font-black">생명 회복</div><span className="font-black">10P</span></button>
+                 <button onClick={() => {/* Upgrade Logic */}} className="w-full p-6 bg-red-900/20 border border-red-500/20 rounded-[2rem] flex justify-between items-center hover:bg-red-600 transition-all"><span className="text-3xl">⚔️</span><div className="font-black">공격력 강화</div><span className="font-black">10P</span></button>
+                 <button onClick={() => {/* Heal Logic */}} className="w-full p-6 bg-emerald-900/20 border border-emerald-500/20 rounded-[2rem] flex justify-between items-center hover:bg-emerald-600 transition-all"><span className="text-3xl">❤️</span><div className="font-black">생명력 회복</div><span className="font-black">10P</span></button>
                </div>
              )}
              {myPlayer.role === Role.COMBAT && (
