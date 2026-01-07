@@ -18,12 +18,11 @@ class P2PNetwork {
   private gameState: GameState | null = null;
   private triggerAction: any = null;
 
-  // 방 코드에서 PeerJS ID로 사용할 수 없는 문자 제거
   private sanitizeId(code: string): string {
     return `edu-arena-${code.trim().toLowerCase().replace(/[^a-z0-9]/g, '')}`;
   }
 
-  init(roomCode: string, isHost: boolean, onStateChange: (state: GameState) => void) {
+  init(roomCode: string, isHost: boolean, onStateChange: (state: GameState) => void, onReady?: () => void) {
     this.isHost = isHost;
     this.onStateChange = onStateChange;
     const peerId = this.sanitizeId(roomCode);
@@ -33,7 +32,6 @@ class P2PNetwork {
       this.connections = {};
     }
 
-    // PeerJS 서버 연결 (공용 서버 사용 시 신뢰성을 위해 STUN 서버 명시)
     this.peer = new Peer(isHost ? peerId : undefined, {
       debug: 1,
       config: {
@@ -46,8 +44,9 @@ class P2PNetwork {
 
     this.peer.on('open', (id: string) => {
       console.log(`[P2P] Peer Opened. ID: ${id}`);
+      if (onReady) onReady();
+      
       if (!isHost) {
-        // 약간의 지연을 주어 호스트가 완전히 등록될 시간을 벌어줌
         setTimeout(() => {
           this.connectToHost(peerId);
         }, 500);
@@ -58,8 +57,10 @@ class P2PNetwork {
       console.error('[P2P] Peer Error:', err.type, err);
       if (err.type === 'unavailable-id') {
         alert("이미 존재하는 방 코드입니다. 다른 코드를 입력해주세요.");
+        window.location.reload(); // 강제 리로드로 상태 초기화
       } else if (err.type === 'peer-not-found') {
-        alert("방을 찾을 수 없습니다. 방 코드가 정확한지, 교사가 방을 먼저 만들었는지 확인하세요.");
+        alert("방을 찾을 수 없습니다. 코드를 확인하세요.");
+        window.location.reload();
       }
     });
 
@@ -71,10 +72,8 @@ class P2PNetwork {
   }
 
   private connectToHost(hostId: string) {
-    console.log(`[P2P] Connecting to Host: ${hostId}`);
     const conn = this.peer.connect(hostId, {
-      reliable: true,
-      metadata: { timestamp: Date.now() }
+      reliable: true
     });
     this.setupConnection(conn);
   }
@@ -82,10 +81,7 @@ class P2PNetwork {
   private setupConnection(conn: any) {
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
-      console.log(`[P2P] Data Channel Open: ${conn.peer}`);
-      
       if (this.isHost && this.gameState) {
-        // 호스트는 새로운 연결이 오면 즉시 현재 상태 브로드캐스트
         this.broadcastState(this.gameState);
       }
     });
@@ -95,22 +91,18 @@ class P2PNetwork {
     });
 
     conn.on('close', () => {
-      console.log(`[P2P] Connection Closed: ${conn.peer}`);
       delete this.connections[conn.peer];
     });
 
     conn.on('error', (err: any) => {
-      console.error(`[P2P] Connection Error:`, err);
       delete this.connections[conn.peer];
     });
   }
 
   private handleMessage(msg: P2PMessage, conn: any) {
     if (this.isHost) {
-      if (msg.type === 'PLAYER_ACTION') {
-        if (this.triggerAction) {
-          this.triggerAction(msg.payload);
-        }
+      if (msg.type === 'PLAYER_ACTION' && this.triggerAction) {
+        this.triggerAction(msg.payload);
       }
     } else {
       if (msg.type === 'STATE_UPDATE') {
@@ -124,18 +116,14 @@ class P2PNetwork {
     this.gameState = state;
     const msg: P2PMessage = { type: 'STATE_UPDATE', payload: state };
     Object.values(this.connections).forEach((conn: any) => {
-      if (conn.open) {
-        conn.send(msg);
-      }
+      if (conn.open) conn.send(msg);
     });
   }
 
   sendAction(action: any) {
     const msg: P2PMessage = { type: 'PLAYER_ACTION', payload: action };
     Object.values(this.connections).forEach((conn: any) => {
-      if (conn.open) {
-        conn.send(msg);
-      }
+      if (conn.open) conn.send(msg);
     });
   }
 
