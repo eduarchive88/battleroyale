@@ -105,12 +105,27 @@ const App: React.FC = () => {
     return newState;
   };
 
-  const executeAttack = (newState: GameState, teamId: string) => {
+  const executeAttack = (newState: GameState, teamId: string, forceDamageTargetId?: string) => {
     const t = newState.teams[teamId];
     if (!t || t.isDead) return;
     const now = Date.now();
     t.lastAtkTime = now;
     playSound('attack');
+
+    const damageBase = (t.stats.atk * (t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1));
+
+    if (forceDamageTargetId) {
+      const target = newState.teams[forceDamageTargetId];
+      if (target && !target.isDead && !target.activeEffects.some(e => e.type === 'w_invinc')) {
+        const damage = Math.max(8, damageBase - target.stats.def);
+        target.hp = Math.max(0, target.hp - damage);
+        t.totalDamageDealt = (t.totalDamageDealt || 0) + damage;
+        if (target.hp <= 0) target.isDead = true;
+        t.points += 2;
+      }
+      return;
+    }
+
     const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 2.5 : 1;
     const attackerAngleRad = t.angle * (Math.PI / 180);
     Object.values(newState.teams).forEach((target: any) => {
@@ -125,7 +140,7 @@ const App: React.FC = () => {
         : (dist < t.stats.range * rangeMult && Math.abs(angleDiff) < 0.3);
       
       if (isHit && !target.activeEffects.some((e: any) => e.type === 'w_invinc')) {
-        const damage = Math.max(8, (t.stats.atk * (t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1)) - target.stats.def);
+        const damage = Math.max(8, damageBase - target.stats.def);
         target.hp = Math.max(0, target.hp - damage);
         t.totalDamageDealt = (t.totalDamageDealt || 0) + damage;
         if (target.hp <= 0) target.isDead = true;
@@ -221,15 +236,8 @@ const App: React.FC = () => {
               t.x = closestTarget.x - Math.cos(rad) * 60;
               t.y = closestTarget.y - Math.sin(rad) * 60;
               t.angle = closestTarget.angle;
-              // 텔레포트 후 즉시 공격 실행 (판정 딜레이 고려)
-              setTimeout(() => {
-                setGameState(current => {
-                  const s = JSON.parse(JSON.stringify(current)) as GameState;
-                  executeAttack(s, t.id);
-                  network.broadcastState(s);
-                  return s;
-                });
-              }, 50);
+              // 습격 성공 시 즉시 확정 데미지 입힘
+              executeAttack(newState, t.id, closestTarget.id);
             }
           } else if (skill.id === 'm_ice') {
             let closestTarget: any = null;
@@ -253,9 +261,10 @@ const App: React.FC = () => {
                     const dist = Math.sqrt(dx * dx + dy * dy);
                     const angleToTarget = Math.atan2(dy, dx);
                     const angleDiff = Math.abs(Math.atan2(Math.sin(angleToTarget - attackerAngleRad), Math.cos(angleToTarget - attackerAngleRad)));
-                    // 레이저 판정 폭 상향 (0.1 -> 0.25)
                     if (dist < 1000 && angleDiff < 0.25) {
-                        target.hp = Math.max(0, target.hp - (t.stats.atk * 2.5));
+                        const damage = Math.floor(t.stats.atk * 2.5);
+                        target.hp = Math.max(0, target.hp - damage);
+                        t.totalDamageDealt = (t.totalDamageDealt || 0) + damage;
                         if(target.hp === 0) target.isDead = true;
                     }
                 });
@@ -279,7 +288,12 @@ const App: React.FC = () => {
               Object.values(newState.teams).forEach((target: any) => {
                 if (target.id === t.id || target.isDead) return;
                 const dist = Math.sqrt((target.x - t.x)**2 + (target.y - t.y)**2);
-                if (dist < 400) { target.hp = Math.max(0, target.hp - (t.stats.atk * 3.5)); if(target.hp===0) target.isDead=true; }
+                if (dist < 400) { 
+                  const damage = Math.floor(t.stats.atk * 3.5);
+                  target.hp = Math.max(0, target.hp - damage); 
+                  t.totalDamageDealt = (t.totalDamageDealt || 0) + damage;
+                  if(target.hp===0) target.isDead=true; 
+                }
               });
             }
           }
@@ -557,6 +571,12 @@ const App: React.FC = () => {
           {isTeacher ? (
             <div className="space-y-6">
               <h3 className={`text-4xl font-black italic border-b-4 pb-4 uppercase transition-colors ${gameState.phase === 'QUIZ' ? 'text-indigo-400 border-indigo-800' : 'text-amber-600 border-amber-900'}`}>교사용 대시보드</h3>
+              
+              {/* 단계 강조용 텍스트 배너 */}
+              <div className={`py-4 px-6 text-center font-black text-2xl border-4 mb-4 rounded italic tracking-widest uppercase transition-all duration-300 ${gameState.phase === 'QUIZ' ? 'bg-indigo-900 border-indigo-400 text-white animate-pulse' : 'bg-red-900 border-red-500 text-white'}`}>
+                {gameState.phase === 'QUIZ' ? '퀴즈 단계' : '배틀 단계'}
+              </div>
+
               <div className="bg-black/80 p-8 border-double border-[8px] border-amber-900 space-y-4">
                 <p className="text-xs font-black text-amber-800 uppercase tracking-widest">현재 퀴즈</p>
                 <p className="text-2xl font-black leading-tight text-amber-100 italic">" {currentQuiz.question} "</p>
