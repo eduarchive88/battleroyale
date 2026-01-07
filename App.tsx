@@ -6,6 +6,21 @@ import { CLASS_BASE_STATS, COSTS, SKILLS_INFO } from './constants';
 import { GameCanvas } from './components/GameCanvas';
 import { Joystick } from './components/Joystick';
 
+// 사운드 재생 헬퍼 함수
+const playSound = (type: 'attack' | 'skill' | 'quiz_ok' | 'quiz_no' | 'phase' | 'click') => {
+  const sounds: Record<string, string> = {
+    attack: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3',
+    skill: 'https://assets.mixkit.co/active_storage/sfx/2581/2581-preview.mp3',
+    quiz_ok: 'https://assets.mixkit.co/active_storage/sfx/1070/1070-preview.mp3',
+    quiz_no: 'https://assets.mixkit.co/active_storage/sfx/1071/1071-preview.mp3',
+    phase: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
+    click: 'https://assets.mixkit.co/active_storage/sfx/2567/2567-preview.mp3'
+  };
+  const audio = new Audio(sounds[type]);
+  audio.volume = 0.4;
+  audio.play().catch(() => {});
+};
+
 const App: React.FC = () => {
   const [view, setView] = useState<'landing' | 'host_setup' | 'host_lobby' | 'lobby' | 'game'>('landing');
   const [roomCode, setRoomCode] = useState('');
@@ -38,12 +53,14 @@ const App: React.FC = () => {
     }
   }, [gameState.isStarted, isHost, view]);
 
+  // 타이머 로직
   useEffect(() => {
     if (isHost && gameState.isStarted) {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = window.setInterval(() => {
         setGameState(prev => {
           if (prev.timer <= 0) {
+            playSound('phase');
             return proceedToNextPhase(prev);
           }
           const newState = { ...prev, timer: prev.timer - 1 };
@@ -63,7 +80,10 @@ const App: React.FC = () => {
     
     const newTeams = { ...prev.teams };
     (Object.values(newTeams) as Team[]).forEach(t => {
+      // 만료된 효과 제거
       t.activeEffects = t.activeEffects.filter(e => e.until > Date.now());
+      // 마나 자동 회복
+      t.mp = Math.min(t.maxMp, t.mp + 10);
     });
 
     const newState: GameState = { ...prev, timer: 30, phase: nextPhase, currentQuizIndex: nextQuizIdx, players: newPlayers, teams: newTeams };
@@ -74,6 +94,17 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isHost) network.setActionListener(handleHostAction);
   }, [isHost, gameState]);
+
+  // 교사 조작 핸들러
+  const handleAdjustTimer = (amount: number) => {
+    playSound('click');
+    network.sendAction({ type: 'ADJUST_TIMER', payload: { amount } });
+  };
+
+  const handleSkipPhase = () => {
+    playSound('click');
+    network.sendAction({ type: 'SKIP_PHASE', payload: {} });
+  };
 
   const handleHostAction = (action: any) => {
     setGameState(prev => {
@@ -126,16 +157,20 @@ const App: React.FC = () => {
           const p = newState.players[payload.playerId];
           if (p && !p.hasSubmittedQuiz) {
             p.hasSubmittedQuiz = true;
-            // 문제 보상 변경: 정답 6P, 오답 4P
-            if (payload.correct) newState.teams[payload.teamId].points += 6;
-            else newState.teams[payload.teamId].points += 4;
+            if (payload.correct) {
+              newState.teams[payload.teamId].points += 6;
+              playSound('quiz_ok');
+            } else {
+              newState.teams[payload.teamId].points += 4;
+              playSound('quiz_no');
+            }
           }
           break;
         }
         case 'MOVE': {
           const t = newState.teams[payload.teamId];
           if (t && !t.isDead && newState.phase === 'BATTLE') {
-            const speedMult = t.activeEffects.some(e => e.type === 'w_speed') ? 1.8 : 1;
+            const speedMult = t.activeEffects.some(e => e.type === 'w_speed') ? 2.5 : 1;
             t.x = Math.max(0, Math.min(1000, t.x + payload.dir.x * t.stats.speed * 4 * speedMult));
             t.y = Math.max(0, Math.min(1000, t.y + payload.dir.y * t.stats.speed * 4 * speedMult));
             if (payload.dir.x !== 0 || payload.dir.y !== 0) {
@@ -148,7 +183,8 @@ const App: React.FC = () => {
           const t = newState.teams[payload.teamId];
           if (t && !t.isDead && newState.phase === 'BATTLE') {
             t.lastAtkTime = Date.now();
-            const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 2.5 : 1;
+            playSound('attack');
+            const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 3 : 1;
             const atkMult = t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1;
             Object.values(newState.teams).forEach((target: any) => {
               if (target.id === t.id || target.isDead) return;
@@ -172,6 +208,7 @@ const App: React.FC = () => {
           const t = newState.teams[payload.teamId];
           if (!t || t.points < payload.cost) return newState;
           t.points -= payload.cost;
+          playSound('click');
           if (payload.action === 'ITEM') {
             (t.items as any)[payload.item] = true;
             if (payload.item === 'weapon') t.stats.atk += 15;
@@ -180,16 +217,14 @@ const App: React.FC = () => {
           } else if (payload.action === 'SKILL') {
             t.unlockedSkills.push(payload.skillId);
           } else if (payload.action === 'STAT') {
-            if (payload.stat === 'hp') t.hp = Math.min(t.maxHp, t.hp + 20);
-            if (payload.stat === 'mp') t.mp = Math.min(t.maxMp, t.mp + 20);
-            // 영구 강화 추가
-            if (payload.stat === 'perm_atk') t.stats.atk += 5;
-            if (payload.stat === 'perm_def') t.stats.def += 5;
-            if (payload.stat === 'perm_speed') t.stats.speed += 0.5;
-            // 부활 추가
+            if (payload.stat === 'hp') t.hp = Math.min(t.maxHp, t.hp + 30);
+            if (payload.stat === 'mp') t.mp = Math.min(t.maxMp, t.mp + 30);
+            if (payload.stat === 'perm_atk') t.stats.atk += 8;
+            if (payload.stat === 'perm_def') t.stats.def += 8;
+            if (payload.stat === 'perm_speed') t.stats.speed += 0.8;
             if (payload.stat === 'revive' && t.isDead) {
               t.isDead = false;
-              t.hp = 10; // 부활 시 체력 10
+              t.hp = 10;
             }
           }
           break;
@@ -200,13 +235,28 @@ const App: React.FC = () => {
           if (t && skill && t.mp >= skill.mp && !t.isDead) {
             if (t.activeEffects.some(e => e.type === skill.id)) return newState;
             t.mp -= skill.mp;
-            t.activeEffects.push({ type: skill.id, until: Date.now() + 3000 });
+            playSound('skill');
+            // 스킬 지속 시간 적용
+            const duration = skill.id === 'm_laser' ? 500 : 3000;
+            t.activeEffects.push({ type: skill.id, until: Date.now() + duration });
+            
+            // 즉시 발동형 스킬 로직
             if (skill.id === 'r_tele') {
               const others = Object.values(newState.teams).filter(ot => ot.id !== t.id && !ot.isDead);
               if (others.length > 0) {
                 const target = others[Math.floor(Math.random() * others.length)];
-                t.x = target.x - 50; t.y = target.y - 50;
+                t.x = target.x - 60; t.y = target.y - 60;
               }
+            }
+            if (skill.id === 'm_thunder') {
+              Object.values(newState.teams).forEach((target: any) => {
+                if (target.id === t.id || target.isDead) return;
+                const dx = target.x - t.x; const dy = target.y - t.y;
+                if (Math.sqrt(dx*dx + dy*dy) < 400) {
+                  target.hp = Math.max(0, target.hp - 40);
+                  if (target.hp === 0) target.isDead = true;
+                }
+              });
             }
           }
           break;
@@ -237,6 +287,7 @@ const App: React.FC = () => {
   };
 
   const startBattle = () => {
+    playSound('phase');
     const ns = { ...gameState, isStarted: true };
     setGameState(ns);
     network.broadcastState(ns);
@@ -530,7 +581,7 @@ const App: React.FC = () => {
                         <div className="flex justify-between items-center mb-3">
                            <span className="font-black text-sm">{t.name}</span>
                            <div className="flex gap-1">
-                              <button onClick={()=>network.sendAction({type:'GIVE_POINT', payload:{teamId:t.id, amount:5}})} className="bg-amber-500 text-black px-2 py-1 rounded-lg text-[10px] font-black">+5P</button>
+                              <button onClick={()=>{ playSound('click'); network.sendAction({type:'GIVE_POINT', payload:{teamId:t.id, amount:5}})}} className="bg-amber-500 text-black px-2 py-1 rounded-lg text-[10px] font-black">+5P</button>
                            </div>
                         </div>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-bold text-slate-400">
@@ -543,14 +594,14 @@ const App: React.FC = () => {
                 )}
                 </div>
                 
-                {/* 교사 조작 버튼: 하단 고정 */}
+                {/* 교사 조작 버튼 */}
                 <div className="mt-auto space-y-3 bg-slate-900/80 p-4 rounded-3xl border border-white/10">
                    <p className="text-xs font-black text-blue-400 uppercase text-center mb-2 tracking-widest">Teacher Controls</p>
                    <div className="grid grid-cols-2 gap-3">
-                      <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:5}})} className="bg-emerald-600 hover:bg-emerald-500 py-3 rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-2"><span>+5s</span></button>
-                      <button onClick={()=>network.sendAction({type:'ADJUST_TIMER', payload:{amount:-5}})} className="bg-rose-600 hover:bg-rose-500 py-3 rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-2"><span>-5s</span></button>
+                      <button onClick={() => handleAdjustTimer(5)} className="bg-emerald-600 hover:bg-emerald-500 py-3 rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-2"><span>+5s</span></button>
+                      <button onClick={() => handleAdjustTimer(-5)} className="bg-rose-600 hover:bg-rose-500 py-3 rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-2"><span>-5s</span></button>
                    </div>
-                   <button onClick={()=>network.sendAction({type:'SKIP_PHASE', payload:{}})} className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black text-base shadow-xl border-2 border-white/10">다음 단계로 즉시 스킵 (Skip)</button>
+                   <button onClick={handleSkipPhase} className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black text-base shadow-xl border-2 border-white/10">다음 단계로 즉시 스킵 (Skip)</button>
                 </div>
              </div>
            )}
@@ -593,57 +644,49 @@ const App: React.FC = () => {
                 )}
 
                 {myPlayer.role === Role.SUPPORT && team && (
-                  <div className="space-y-6">
-                    <div className="flex justify-between items-center bg-black/30 p-5 rounded-[2rem] border-2 border-emerald-500/30">
+                  <div className="space-y-6 overflow-y-auto max-h-[80vh] custom-scrollbar">
+                    <div className="flex justify-between items-center bg-black/30 p-5 rounded-[2rem] border-2 border-emerald-500/30 sticky top-0 backdrop-blur-md z-10">
                        <h3 className="text-xl font-black text-emerald-400">SUPPORTER</h3>
                        <span className="bg-amber-500 text-black px-4 py-1 rounded-full font-black italic shadow-lg">{team.points} P</span>
                     </div>
-                    {gameState.phase === 'BATTLE' || gameState.phase === 'QUIZ' ? (
-                      <div className="space-y-6">
-                         <section className="space-y-3">
-                           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Team Upgrade (4-8P)</p>
-                           <div className="grid grid-cols-1 gap-2">
-                              <button disabled={team.items.weapon} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'weapon', cost:COSTS.ITEM}})} className="p-4 bg-slate-900 hover:bg-emerald-900/50 disabled:opacity-20 rounded-2xl text-xs font-bold border border-white/5 flex justify-between"><span>⚔️ 전설의 무기 (ATK++)</span><span>4P</span></button>
-                              <button disabled={team.items.armor} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'ITEM', item:'armor', cost:COSTS.ITEM}})} className="p-4 bg-slate-900 hover:bg-emerald-900/50 disabled:opacity-20 rounded-2xl text-xs font-bold border border-white/5 flex justify-between"><span>🛡️ 신성한 갑옷 (DEF++)</span><span>4P</span></button>
-                              
-                              {/* 영구 스탯 강화 버튼 */}
-                              <div className="grid grid-cols-2 gap-2 mt-2">
-                                <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'perm_atk', cost:5}})} className="p-3 bg-slate-900 hover:bg-blue-900/40 rounded-xl text-[10px] font-black border border-white/10 flex flex-col items-center"><span>⚔️ 공격력 영구강화</span><span>5P</span></button>
-                                <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'perm_def', cost:5}})} className="p-3 bg-slate-900 hover:bg-blue-900/40 rounded-xl text-[10px] font-black border border-white/10 flex flex-col items-center"><span>🛡️ 방어력 영구강화</span><span>5P</span></button>
-                                <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'perm_speed', cost:5}})} className="p-3 bg-slate-900 hover:bg-blue-900/40 rounded-xl text-[10px] font-black border border-white/10 flex flex-col items-center col-span-2"><span>🏃 이동속도 영구강화</span><span>5P</span></button>
-                              </div>
-                           </div>
-                         </section>
-                         <section className="space-y-3">
-                           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Skill Unlock (6P)</p>
-                           <div className="space-y-2 overflow-y-auto max-h-48 custom-scrollbar">
-                              {SKILLS_INFO[team.classType].map(sk => (
-                                <button key={sk.id} disabled={team.unlockedSkills.includes(sk.id)} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'SKILL', skillId:sk.id, cost:COSTS.SKILL}})} className="w-full p-4 bg-slate-900 hover:bg-blue-900/50 disabled:opacity-20 rounded-2xl text-left border border-white/10 group">
-                                  <div className="flex justify-between items-center mb-1"><span className="font-black text-xs text-white group-hover:text-blue-400">{sk.name}</span><span className="text-[10px] font-black bg-white/10 px-2 rounded">6P</span></div>
-                                  <p className="text-[10px] text-slate-500 leading-tight">{sk.desc}</p>
-                                </button>
-                              ))}
-                           </div>
-                         </section>
-                         <section className="space-y-3">
-                           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Crisis Management (3-8P)</p>
-                           <div className="grid grid-cols-2 gap-2">
-                              <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'hp', cost:COSTS.STAT}})} className="p-3 bg-rose-900/20 hover:bg-rose-900/40 rounded-xl text-[10px] font-black border border-rose-500/20">❤️ HP 회복 (3P)</button>
-                              <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'mp', cost:COSTS.STAT}})} className="p-3 bg-blue-900/20 hover:bg-blue-900/40 rounded-xl text-[10px] font-black border border-blue-500/20">💧 MP 회복 (3P)</button>
-                              
-                              {/* 부활 버튼 */}
-                              <button 
-                                onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'revive', cost:8}})} 
-                                className={`p-3 rounded-xl text-[10px] font-black border col-span-2 flex items-center justify-center gap-2 ${team.isDead ? 'bg-emerald-600 hover:bg-emerald-500 border-white/20 animate-pulse' : 'bg-slate-900 border-white/5 opacity-40'}`}
-                              >
-                                <span>✨ 부활 (Revive)</span><span>8P</span>
-                              </button>
-                           </div>
-                         </section>
-                      </div>
-                    ) : null}
                     
-                    {/* 정답 리뷰 영역은 항상 하단에 위치 */}
+                    <div className="space-y-6">
+                       <section className="space-y-3">
+                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Permanent Upgrades</p>
+                         <div className="grid grid-cols-2 gap-2">
+                            <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'perm_atk', cost:5}})} className="p-3 bg-slate-900 hover:bg-blue-900/40 rounded-xl text-[10px] font-black border border-white/10 flex flex-col items-center"><span>⚔️ ATK++</span><span>5P</span></button>
+                            <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'perm_def', cost:5}})} className="p-3 bg-slate-900 hover:bg-blue-900/40 rounded-xl text-[10px] font-black border border-white/10 flex flex-col items-center"><span>🛡️ DEF++</span><span>5P</span></button>
+                            <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'perm_speed', cost:5}})} className="p-3 bg-slate-900 hover:bg-blue-900/40 rounded-xl text-[10px] font-black border border-white/10 flex flex-col items-center col-span-2"><span>🏃 SPEED++</span><span>5P</span></button>
+                         </div>
+                       </section>
+                       
+                       <section className="space-y-3">
+                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Skill Unlock (6P)</p>
+                         <div className="space-y-2">
+                            {SKILLS_INFO[team.classType].map(sk => (
+                              <button key={sk.id} disabled={team.unlockedSkills.includes(sk.id)} onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'SKILL', skillId:sk.id, cost:COSTS.SKILL}})} className="w-full p-4 bg-slate-900 hover:bg-blue-900/50 disabled:opacity-20 rounded-2xl text-left border border-white/10 group">
+                                <div className="flex justify-between items-center mb-1"><span className="font-black text-xs text-white group-hover:text-blue-400">{sk.name}</span><span className="text-[10px] font-black bg-white/10 px-2 rounded">6P</span></div>
+                                <p className="text-[10px] text-slate-500 leading-tight">{sk.desc}</p>
+                              </button>
+                            ))}
+                         </div>
+                       </section>
+
+                       <section className="space-y-3">
+                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Crisis Management</p>
+                         <div className="grid grid-cols-2 gap-2">
+                            <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'hp', cost:COSTS.STAT}})} className="p-3 bg-rose-900/20 hover:bg-rose-900/40 rounded-xl text-[10px] font-black border border-rose-500/20">❤️ Heal (3P)</button>
+                            <button onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'mp', cost:COSTS.STAT}})} className="p-3 bg-blue-900/20 hover:bg-blue-900/40 rounded-xl text-[10px] font-black border border-blue-500/20">💧 MP (3P)</button>
+                            <button 
+                              onClick={()=>network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'revive', cost:8}})} 
+                              className={`p-3 rounded-xl text-[10px] font-black border col-span-2 flex items-center justify-center gap-2 ${team.isDead ? 'bg-emerald-600 hover:bg-emerald-500 border-white/20 animate-pulse' : 'bg-slate-900 border-white/5 opacity-40'}`}
+                            >
+                              <span>✨ Revive</span><span>8P</span>
+                            </button>
+                         </div>
+                       </section>
+                    </div>
+                    
                     <div className="p-6 bg-black/40 rounded-[2.5rem] border border-white/5">
                       <p className="text-xs font-black text-slate-500 uppercase mb-4">정답 리뷰</p>
                       {prevQuiz ? (
