@@ -55,4 +55,6 @@ export interface GameState {
   players: Record<string, Player>;
   quizzes: Quiz[];
   roomCode?: string;
+  currentQuizIndex: number;
+  phase: 'QUIZ' | 'BATTLE';
 }
