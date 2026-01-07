@@ -30,13 +30,14 @@ export interface Team {
   maxMp: number;
   x: number;
   y: number;
-  angle: number; // 추가: 바라보는 각도 (0~360)
+  angle: number;
   isDead: boolean;
   classType: ClassType;
   stats: CharacterStats;
   items: { weapon: boolean; armor: boolean; boots: boolean };
   unlockedSkills: string[];
   activeEffects: { type: string; until: number }[];
+  skillCooldowns: Record<string, number>; // 추가: 스킬별 쿨타임 만료 시간
   lastAtkTime: number;
 }
 

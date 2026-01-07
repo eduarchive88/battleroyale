@@ -6,7 +6,6 @@ import { CLASS_BASE_STATS, COSTS, SKILLS_INFO } from './constants';
 import { GameCanvas } from './components/GameCanvas';
 import { Joystick } from './components/Joystick';
 
-// 사운드 재생 헬퍼 함수
 const playSound = (type: 'attack' | 'skill' | 'quiz_ok' | 'quiz_no' | 'phase' | 'click') => {
   const sounds: Record<string, string> = {
     attack: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3',
@@ -53,7 +52,6 @@ const App: React.FC = () => {
     }
   }, [gameState.isStarted, isHost, view]);
 
-  // 타이머 로직
   useEffect(() => {
     if (isHost && gameState.isStarted) {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -80,10 +78,8 @@ const App: React.FC = () => {
     
     const newTeams = { ...prev.teams };
     (Object.values(newTeams) as Team[]).forEach(t => {
-      // 만료된 효과 제거
       t.activeEffects = t.activeEffects.filter(e => e.until > Date.now());
-      // 마나 자동 회복
-      t.mp = Math.min(t.maxMp, t.mp + 10);
+      t.mp = Math.min(t.maxMp, t.mp + 15);
     });
 
     const newState: GameState = { ...prev, timer: 30, phase: nextPhase, currentQuizIndex: nextQuizIdx, players: newPlayers, teams: newTeams };
@@ -95,15 +91,11 @@ const App: React.FC = () => {
     if (isHost) network.setActionListener(handleHostAction);
   }, [isHost, gameState]);
 
-  // 교사 조작 핸들러
-  const handleAdjustTimer = (amount: number) => {
-    playSound('click');
-    network.sendAction({ type: 'ADJUST_TIMER', payload: { amount } });
-  };
-
-  const handleSkipPhase = () => {
-    playSound('click');
-    network.sendAction({ type: 'SKIP_PHASE', payload: {} });
+  // 교사 조작 기능: 호스트일 때 즉시 로컬 액션 실행 후 브로드캐스트
+  const teacherAction = (type: string, payload: any) => {
+    if (isHost) {
+      handleHostAction({ type, payload });
+    }
   };
 
   const handleHostAction = (action: any) => {
@@ -125,7 +117,7 @@ const App: React.FC = () => {
               x: Math.random() * 800 + 100, y: Math.random() * 800 + 100, angle: 0,
               isDead: false, classType: classToUse, stats: { ...base },
               items: { weapon: false, armor: false, boots: false },
-              unlockedSkills: [], activeEffects: [], lastAtkTime: 0
+              unlockedSkills: [], activeEffects: [], skillCooldowns: {}, lastAtkTime: 0
             };
           } else if (player.role === Role.COMBAT) {
             newState.teams[player.teamId].classType = classToUse;
@@ -232,31 +224,45 @@ const App: React.FC = () => {
         case 'SKILL_USE': {
           const t = newState.teams[payload.teamId];
           const skill = SKILLS_INFO[t.classType].find(s => s.id === payload.skId);
-          if (t && skill && t.mp >= skill.mp && !t.isDead) {
-            if (t.activeEffects.some(e => e.type === skill.id)) return newState;
+          if (!t || !skill || t.isDead) return newState;
+
+          const now = Date.now();
+          const cooldownUntil = t.skillCooldowns?.[payload.skId] || 0;
+          if (now < cooldownUntil) return newState; // 쿨타임 중이면 무시
+
+          if (t.mp >= skill.mp) {
             t.mp -= skill.mp;
             playSound('skill');
-            // 스킬 지속 시간 적용
-            const duration = skill.id === 'm_laser' ? 500 : 3000;
-            t.activeEffects.push({ type: skill.id, until: Date.now() + duration });
             
-            // 즉시 발동형 스킬 로직
-            if (skill.id === 'r_tele') {
-              const others = Object.values(newState.teams).filter(ot => ot.id !== t.id && !ot.isDead);
-              if (others.length > 0) {
-                const target = others[Math.floor(Math.random() * others.length)];
-                t.x = target.x - 60; t.y = target.y - 60;
-              }
-            }
-            if (skill.id === 'm_thunder') {
-              Object.values(newState.teams).forEach((target: any) => {
-                if (target.id === t.id || target.isDead) return;
-                const dx = target.x - t.x; const dy = target.y - t.y;
-                if (Math.sqrt(dx*dx + dy*dy) < 400) {
-                  target.hp = Math.max(0, target.hp - 40);
-                  if (target.hp === 0) target.isDead = true;
+            // 쿨타임 설정 (기본 4초, 스킬별 조정 가능)
+            if (!t.skillCooldowns) t.skillCooldowns = {};
+            t.skillCooldowns[payload.skId] = now + 4000;
+
+            // 단발성 스킬 혹은 버프 스킬 구분 처리
+            const isBuffSkill = ['w_speed', 'w_invinc', 'w_double', 'r_hide', 'r_aspeed', 'a_range', 'a_aspeed'].includes(skill.id);
+            if (isBuffSkill) {
+              t.activeEffects.push({ type: skill.id, until: now + 2500 }); // 버프는 2.5초간 유지
+            } else {
+              // 단발성 스킬(레이저, 벼락, 텔레포트 등)은 이펙트용으로 짧게만 추가
+              t.activeEffects.push({ type: skill.id, until: now + 400 }); 
+              
+              if (skill.id === 'r_tele') {
+                const others = Object.values(newState.teams).filter(ot => ot.id !== t.id && !ot.isDead);
+                if (others.length > 0) {
+                  const target = others[Math.floor(Math.random() * others.length)];
+                  t.x = target.x - 60; t.y = target.y - 60;
                 }
-              });
+              }
+              if (skill.id === 'm_thunder') {
+                Object.values(newState.teams).forEach((target: any) => {
+                  if (target.id === t.id || target.isDead) return;
+                  const dx = target.x - t.x; const dy = target.y - t.y;
+                  if (Math.sqrt(dx*dx + dy*dy) < 400) {
+                    target.hp = Math.max(0, target.hp - 45);
+                    if (target.hp === 0) target.isDead = true;
+                  }
+                });
+              }
             }
           }
           break;
@@ -504,7 +510,6 @@ const App: React.FC = () => {
 
     return (
       <div className={`fixed inset-0 ${phaseColor} flex flex-col md:flex-row overflow-hidden transition-colors duration-700`}>
-        {/* 중앙 전장 영역 */}
         <div className={`flex-1 relative ${gameState.phase === 'QUIZ' ? 'opacity-40 grayscale-[0.5]' : ''} transition-all duration-700`}>
            <GameCanvas teams={gameState.teams} myTeamId={myPlayer?.teamId} />
            
@@ -522,10 +527,11 @@ const App: React.FC = () => {
                   <div className="flex flex-col gap-4">
                     {team.unlockedSkills.map((skId, i) => {
                       const sk = SKILLS_INFO[team.classType].find(s => s.id === skId);
-                      const effect = team.activeEffects.find(e => e.type === skId);
-                      const timeLeft = effect ? Math.max(0, Math.ceil((effect.until - Date.now()) / 1000)) : 0;
+                      const cooldownUntil = team.skillCooldowns?.[skId] || 0;
+                      const timeLeft = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+                      
                       return (
-                        <button key={i} onClick={()=>network.sendAction({type:'SKILL_USE', payload:{teamId:myPlayer.teamId, skId}})} className={`relative px-6 py-3 rounded-2xl font-black text-xs border-2 transition-all ${timeLeft > 0 ? 'bg-amber-600 border-white scale-110' : 'bg-blue-600 border-white/20'}`}>
+                        <button key={i} disabled={timeLeft > 0} onClick={()=>network.sendAction({type:'SKILL_USE', payload:{teamId:myPlayer.teamId, skId}})} className={`relative px-6 py-3 rounded-2xl font-black text-xs border-2 transition-all ${timeLeft > 0 ? 'bg-slate-700 border-slate-500 opacity-50' : 'bg-blue-600 border-white/20 hover:scale-110 active:scale-95'}`}>
                           {sk?.name} {timeLeft > 0 ? `(${timeLeft}s)` : `(${sk?.mp}M)`}
                         </button>
                       );
@@ -581,7 +587,7 @@ const App: React.FC = () => {
                         <div className="flex justify-between items-center mb-3">
                            <span className="font-black text-sm">{t.name}</span>
                            <div className="flex gap-1">
-                              <button onClick={()=>{ playSound('click'); network.sendAction({type:'GIVE_POINT', payload:{teamId:t.id, amount:5}})}} className="bg-amber-500 text-black px-2 py-1 rounded-lg text-[10px] font-black">+5P</button>
+                              <button onClick={()=>{ playSound('click'); teacherAction('GIVE_POINT', {teamId:t.id, amount:5})}} className="bg-amber-500 text-black px-2 py-1 rounded-lg text-[10px] font-black">+5P</button>
                            </div>
                         </div>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-bold text-slate-400">
@@ -594,14 +600,13 @@ const App: React.FC = () => {
                 )}
                 </div>
                 
-                {/* 교사 조작 버튼 */}
                 <div className="mt-auto space-y-3 bg-slate-900/80 p-4 rounded-3xl border border-white/10">
                    <p className="text-xs font-black text-blue-400 uppercase text-center mb-2 tracking-widest">Teacher Controls</p>
                    <div className="grid grid-cols-2 gap-3">
-                      <button onClick={() => handleAdjustTimer(5)} className="bg-emerald-600 hover:bg-emerald-500 py-3 rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-2"><span>+5s</span></button>
-                      <button onClick={() => handleAdjustTimer(-5)} className="bg-rose-600 hover:bg-rose-500 py-3 rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-2"><span>-5s</span></button>
+                      <button onClick={() => teacherAction('ADJUST_TIMER', {amount: 5})} className="bg-emerald-600 hover:bg-emerald-500 py-3 rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-2"><span>+5s</span></button>
+                      <button onClick={() => teacherAction('ADJUST_TIMER', {amount: -5})} className="bg-rose-600 hover:bg-rose-500 py-3 rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-2"><span>-5s</span></button>
                    </div>
-                   <button onClick={handleSkipPhase} className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black text-base shadow-xl border-2 border-white/10">다음 단계로 즉시 스킵 (Skip)</button>
+                   <button onClick={() => teacherAction('SKIP_PHASE', {})} className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black text-base shadow-xl border-2 border-white/10">다음 단계로 즉시 스킵 (Skip)</button>
                 </div>
              </div>
            )}
