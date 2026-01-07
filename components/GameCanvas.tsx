@@ -20,13 +20,12 @@ const getImageUrl = (classType: ClassType) => {
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
   const svgRef = useRef<SVGSVGElement>(null);
-  const lastAtkTimes = useRef<Record<string, number>>({});
+  const lastAtkHandled = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (!svgRef.current) return;
     const svg = d3.select(svgRef.current);
     
-    // 이펙트 레이어는 매 프레임 초기화하지 않고 애니메이션 후 자가 삭제되도록 관리
     let mainLayer = svg.select('.main-layer');
     if (mainLayer.empty()) {
       mainLayer = svg.append('g').attr('class', 'main-layer');
@@ -69,7 +68,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
     units.select('.info-ui').attr('transform', d => `translate(0, -55) rotate(${-d.angle})`);
     units.select('.char-img').attr('xlink:href', d => getImageUrl(d.classType))
       .style('filter', d => {
-        if (d.activeEffects.some(e => e.type === 'w_invinc')) return 'drop-shadow(0 0 15px gold) brightness(1.2)';
+        if (d.activeEffects.some(e => e.type === 'w_invinc')) return 'drop-shadow(0 0 15px gold) brightness(1.5)';
         if (d.activeEffects.some(e => e.type === 'w_double')) return 'drop-shadow(0 0 10px red) saturate(2)';
         return 'none';
       });
@@ -78,51 +77,52 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
     units.select('.name').text(d => `${d.name} (${d.points}P)`);
     units.select('.hp-fg').attr('width', d => Math.max(0, (d.hp / d.maxHp) * 70));
 
-    // 이펙트 렌더링
+    // 이펙트 자가 정화 및 렌더링
     teamArray.forEach((d: Team) => {
       const angleRad = d.angle * (Math.PI / 180);
       const now = Date.now();
 
-      // 1. 기본 공격 이펙트 (실제 range만큼 그림)
-      if (d.lastAtkTime > (lastAtkTimes.current[d.id] || 0)) {
-        lastAtkTimes.current[d.id] = d.lastAtkTime;
+      // 1. 기본 공격 시각화 (클래스별 상이)
+      if (d.lastAtkTime > (lastAtkHandled.current[d.id] || 0)) {
+        lastAtkHandled.current[d.id] = d.lastAtkTime;
         const rangeMult = d.activeEffects.some(e => e.type === 'a_range') ? 3 : 1;
         const actualRange = d.stats.range * rangeMult;
 
-        effectLayer.append('circle')
-          .attr('cx', d.x).attr('cy', d.y).attr('r', 10)
-          .attr('fill', 'none').attr('stroke', 'rgba(255,255,255,0.8)').attr('stroke-width', 2)
-          .transition().duration(200)
-          .attr('r', actualRange) // 실제 공격 판정 범위까지 확장
-          .style('opacity', 0).remove();
+        if (d.classType === ClassType.WARRIOR || d.classType === ClassType.ROGUE) {
+          // 참격(Slash) 이펙트 - 캐릭터 전방 부채꼴
+          const arc = d3.arc().innerRadius(10).outerRadius(actualRange).startAngle(Math.PI/2 - 0.7).endAngle(Math.PI/2 + 0.7);
+          effectLayer.append('path').attr('d', arc as any)
+            .attr('transform', `translate(${d.x}, ${d.y}) rotate(${d.angle - 90})`)
+            .attr('fill', d.classType === ClassType.WARRIOR ? 'rgba(255,255,255,0.4)' : 'rgba(255,0,0,0.4)')
+            .transition().duration(200).style('opacity', 0).remove();
+        } else {
+          // 투사체/화살(Projectile) 이펙트 - 직선
+          const endX = d.x + Math.cos(angleRad) * actualRange;
+          const endY = d.y + Math.sin(angleRad) * actualRange;
+          effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY)
+            .attr('stroke', d.classType === ClassType.ARCHER ? '#fff' : '#0ff').attr('stroke-width', 4)
+            .attr('stroke-dasharray', '10,5')
+            .transition().duration(200).style('opacity', 0).remove();
+        }
       }
 
-      // 2. 스킬 이펙트
+      // 2. 스킬 이펙트 (지속 시간 만료 전까지만 렌더링)
       d.activeEffects.forEach(eff => {
-        if (eff.until < now) return; 
+        if (eff.until < now) return;
 
         if (eff.type === 'm_laser') {
            const endX = d.x + Math.cos(angleRad) * 1000;
            const endY = d.y + Math.sin(angleRad) * 1000;
-           const g = effectLayer.append('g').attr('class', 'laser-fx');
-           g.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', 'cyan').attr('stroke-width', 30).style('filter', 'blur(10px)');
-           g.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY).attr('stroke', 'white').attr('stroke-width', 8);
-           g.transition().duration(400).style('opacity', 0).remove();
+           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY)
+            .attr('stroke', 'cyan').attr('stroke-width', 20).attr('opacity', 0.6).style('filter', 'blur(5px)')
+            .transition().duration(100).remove();
+           effectLayer.append('line').attr('x1', d.x).attr('y1', d.y).attr('x2', endX).attr('y2', endY)
+            .attr('stroke', 'white').attr('stroke-width', 5).transition().duration(100).remove();
         }
         if (eff.type === 'm_thunder') {
-           effectLayer.append('circle').attr('cx', d.x).attr('cy', d.y).attr('r', 400) // 판정 범위 400과 일치
-            .attr('fill', 'rgba(255,255,0,0.1)').attr('stroke', 'yellow').attr('stroke-width', 5).style('filter', 'blur(5px)')
-            .transition().duration(400).attr('r', 420).style('opacity', 0).remove();
-        }
-        if (eff.type === 'a_multi') {
-           for(let i=-2; i<=2; i++) {
-              const a = angleRad + i*0.2;
-              effectLayer.append('line')
-                .attr('x1', d.x).attr('y1', d.y)
-                .attr('x2', d.x + Math.cos(a)*500).attr('y2', d.y + Math.sin(a)*500)
-                .attr('stroke', '#fff').attr('stroke-width', 4)
-                .transition().duration(300).style('opacity', 0).remove();
-           }
+           effectLayer.append('circle').attr('cx', d.x).attr('cy', d.y).attr('r', 400)
+            .attr('fill', 'none').attr('stroke', 'yellow').attr('stroke-width', 4).attr('opacity', 0.5)
+            .transition().duration(300).attr('r', 450).style('opacity', 0).remove();
         }
       });
     });
