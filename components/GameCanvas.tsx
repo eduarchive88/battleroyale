@@ -84,9 +84,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ teams, myTeamId }) => {
         lastAtkHandled.current[d.id] = d.lastAtkTime;
         const rangeMult = d.activeEffects.some(e => e.type === 'a_range') ? 2.5 : 1;
         const actualRange = d.stats.range * rangeMult;
+        
         if (d.classType === ClassType.WARRIOR || d.classType === ClassType.ROGUE) {
-          const arc = d3.arc().innerRadius(10).outerRadius(actualRange).startAngle(Math.PI/2 - 1).endAngle(Math.PI/2 + 1);
-          effectLayer.append('path').attr('d', arc as any).attr('transform', `translate(${d.x}, ${d.y}) rotate(${d.angle - 90})`).attr('fill', 'rgba(255,255,255,0.4)').transition().duration(200).style('opacity', 0).remove();
+          // Arc visualization: 중심점 이동 및 회전 보정 (전방으로 부채꼴 이펙트 송출)
+          const arc = d3.arc().innerRadius(10).outerRadius(actualRange).startAngle(-Math.PI/3).endAngle(Math.PI/3);
+          effectLayer.append('path')
+            .attr('d', arc as any)
+            .attr('transform', `translate(${d.x}, ${d.y}) rotate(${d.angle + 90})`)
+            .attr('fill', d.classType === ClassType.ROGUE ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255, 255, 255, 0.4)')
+            .transition().duration(200).style('opacity', 0).remove();
         } else {
           const endX = d.x + Math.cos(angleRad) * actualRange;
           const endY = d.y + Math.sin(angleRad) * actualRange;

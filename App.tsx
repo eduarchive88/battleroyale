@@ -105,6 +105,34 @@ const App: React.FC = () => {
     return newState;
   };
 
+  const executeAttack = (newState: GameState, teamId: string) => {
+    const t = newState.teams[teamId];
+    if (!t || t.isDead) return;
+    const now = Date.now();
+    t.lastAtkTime = now;
+    playSound('attack');
+    const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 2.5 : 1;
+    const attackerAngleRad = t.angle * (Math.PI / 180);
+    Object.values(newState.teams).forEach((target: any) => {
+      if (target.id === t.id || target.isDead) return;
+      const dx = target.x - t.x; const dy = target.y - t.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const angleToTarget = Math.atan2(dy, dx);
+      const angleDiff = Math.abs(angleToTarget - attackerAngleRad);
+      const normalizedDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
+      let isHit = (t.classType === ClassType.WARRIOR || t.classType === ClassType.ROGUE) 
+        ? (dist < t.stats.range * rangeMult && Math.abs(normalizedDiff) < Math.PI / 3)
+        : (dist < t.stats.range * rangeMult && Math.abs(normalizedDiff) < 0.25);
+      if (isHit && !target.activeEffects.some((e: any) => e.type === 'w_invinc')) {
+        const damage = Math.max(8, (t.stats.atk * (t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1)) - target.stats.def);
+        target.hp = Math.max(0, target.hp - damage);
+        t.totalDamageDealt = (t.totalDamageDealt || 0) + damage;
+        if (target.hp <= 0) target.isDead = true;
+        t.points += 2;
+      }
+    });
+  }
+
   const handleHostAction = (action: any) => {
     setGameState(prev => {
       let newState = JSON.parse(JSON.stringify(prev)) as GameState;
@@ -134,12 +162,6 @@ const App: React.FC = () => {
           }
           break;
         }
-        case 'CANCEL_SELECTION': {
-          const { playerId } = payload;
-          delete newState.players[playerId];
-          // If no players left in team, keep the team record for visualization but reset if needed
-          break;
-        }
         case 'MOVE': {
           const t = newState.teams[payload.teamId];
           if (t && !t.isDead && newState.phase === 'BATTLE') {
@@ -151,31 +173,7 @@ const App: React.FC = () => {
           break;
         }
         case 'ATTACK': {
-          const t = newState.teams[payload.teamId];
-          if (t && !t.isDead && newState.phase === 'BATTLE') {
-            t.lastAtkTime = now;
-            playSound('attack');
-            const rangeMult = t.activeEffects.some(e => e.type === 'a_range') ? 2.5 : 1;
-            const attackerAngleRad = t.angle * (Math.PI / 180);
-            Object.values(newState.teams).forEach((target: any) => {
-              if (target.id === t.id || target.isDead) return;
-              const dx = target.x - t.x; const dy = target.y - t.y;
-              const dist = Math.sqrt(dx * dx + dy * dy);
-              const angleToTarget = Math.atan2(dy, dx);
-              const angleDiff = Math.abs(angleToTarget - attackerAngleRad);
-              const normalizedDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
-              let isHit = (t.classType === ClassType.WARRIOR || t.classType === ClassType.ROGUE) 
-                ? (dist < t.stats.range * rangeMult && Math.abs(normalizedDiff) < Math.PI / 3)
-                : (dist < t.stats.range * rangeMult && Math.abs(normalizedDiff) < 0.25);
-              if (isHit && !target.activeEffects.some((e: any) => e.type === 'w_invinc')) {
-                const damage = Math.max(8, (t.stats.atk * (t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1)) - target.stats.def);
-                target.hp = Math.max(0, target.hp - damage);
-                t.totalDamageDealt = (t.totalDamageDealt || 0) + damage;
-                if (target.hp <= 0) target.isDead = true;
-                t.points += 2;
-              }
-            });
-          }
+          executeAttack(newState, payload.teamId);
           break;
         }
         case 'SUPPORT_ACTION': {
@@ -207,7 +205,23 @@ const App: React.FC = () => {
           t.mp -= skill.mp;
           t.skillCooldowns[payload.skId] = now + 5000;
           playSound('skill');
-          if (['w_speed', 'w_invinc', 'w_double', 'r_hide', 'a_range', 'm_laser', 'a_multi'].includes(skill.id)) {
+          
+          if (skill.id === 'r_tele') {
+            let closestTarget: any = null;
+            let minDist = Infinity;
+            Object.values(newState.teams).forEach(target => {
+              if (target.id === t.id || target.isDead) return;
+              const d = Math.sqrt((target.x - t.x)**2 + (target.y - t.y)**2);
+              if (d < minDist) { minDist = d; closestTarget = target; }
+            });
+            if (closestTarget) {
+              const rad = (closestTarget.angle * Math.PI) / 180;
+              t.x = closestTarget.x - Math.cos(rad) * 40;
+              t.y = closestTarget.y - Math.sin(rad) * 40;
+              t.angle = closestTarget.angle;
+              executeAttack(newState, t.id);
+            }
+          } else if (['w_speed', 'w_invinc', 'w_double', 'r_hide', 'a_range', 'm_laser', 'a_multi'].includes(skill.id)) {
             t.activeEffects.push({ type: skill.id, until: now + 2000 });
             if (skill.id === 'a_multi') {
                 Object.values(newState.teams).forEach((target: any) => {
@@ -251,14 +265,11 @@ const App: React.FC = () => {
     });
   };
 
-  // Missing function createRoom fix: Handles room initialization as host
   const createRoom = () => {
     if (!customCode) return alert("방 코드를 입력하세요.");
     if (quizList.length === 0) return alert("최소 1개 이상의 퀴즈가 필요합니다.");
-    
     setIsConnecting(true);
     setIsHost(true);
-    
     const initialGameState: GameState = {
       isStarted: false,
       teams: {},
@@ -269,7 +280,6 @@ const App: React.FC = () => {
       phase: 'QUIZ',
       timer: 30
     };
-    
     network.init(customCode.toUpperCase(), true, setGameState, () => {
       setIsConnecting(false);
       setGameState(initialGameState);
@@ -405,7 +415,7 @@ const App: React.FC = () => {
         {myPlayer ? (
           <div className="bg-slate-900 p-16 border-double border-[16px] border-amber-900 text-center animate-in zoom-in shadow-2xl">
             <p className="text-5xl font-black mb-6 text-amber-200">선택 완료!</p>
-            <p className="text-amber-700 font-black mb-10 tracking-widest animate-pulse">선생님이 게임을 시작할 때까지 기다려주세요...</p>
+            <p className="text-amber-700 font-black mb-10 tracking-widest animate-pulse">대기 중...</p>
             <div className="text-left bg-black/50 p-8 border-4 border-amber-950 mb-10 space-y-2">
               <p className="font-black text-xl text-amber-100">{myPlayer.teamId}번 모둠</p>
               <p className="font-bold text-amber-600 uppercase">내 역할: {myPlayer.role}</p>
@@ -453,8 +463,12 @@ const App: React.FC = () => {
   if (view === 'game') {
     const isTeacher = isHost;
     const team = myPlayer ? gameState.teams[myPlayer.teamId] : null;
-    const currentQuiz = gameState.quizzes[gameState.currentQuizIndex] || { question: "퀴즈 대기 중...", options: ["-","-","-","-"], answer: 0 };
+    const currentQuizIdx = gameState.currentQuizIndex;
+    const currentQuiz = gameState.quizzes[currentQuizIdx] || { question: "퀴즈 대기 중...", options: ["-","-","-","-"], answer: 0 };
     
+    // 이전 퀴즈 결과 송출용 (BATTLE 단계에서 하단에 표시)
+    const lastQuiz = gameState.phase === 'BATTLE' ? gameState.quizzes[currentQuizIdx] : null;
+
     if (gameState.phase === 'GAME_OVER') {
       const winTeam = gameState.winnerTeamId ? gameState.teams[gameState.winnerTeamId] : null;
       return (
@@ -474,11 +488,25 @@ const App: React.FC = () => {
     return (
       <div className={`fixed inset-0 flex flex-col md:flex-row bg-[#020617] overflow-hidden`}>
         <div className={`flex-1 relative ${gameState.phase === 'QUIZ' ? 'opacity-40 grayscale saturate-0' : ''} transition-all duration-[1000ms]`}>
+          <div className="absolute top-4 left-4 z-50 bg-black/60 px-4 py-2 border border-amber-900/50 rounded text-amber-200 font-black text-xs">
+            진행도: {gameState.currentQuizIndex + 1} / {gameState.quizzes.length} 라운드
+          </div>
           <GameCanvas teams={gameState.teams} myTeamId={myPlayer?.teamId} />
           <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-black/90 px-10 py-6 border-double border-[10px] border-amber-900 text-center shadow-2xl z-20">
             <p className="text-[10px] font-black uppercase text-amber-600 tracking-widest mb-1">{gameState.phase === 'QUIZ' ? '퀴즈 시간' : '전투 시간'}</p>
             <p className="text-5xl font-mono font-black text-amber-100">{gameState.timer}s</p>
           </div>
+
+          {lastQuiz && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 w-full max-w-2xl px-4 pointer-events-none">
+              <div className="bg-black/80 p-4 border-l-4 border-amber-600 shadow-2xl text-center">
+                <p className="text-[10px] text-amber-500 font-bold mb-1 uppercase tracking-tighter">직전 문제 학습</p>
+                <p className="text-sm font-bold text-white mb-2 italic">" {lastQuiz.question} "</p>
+                <p className="text-xs font-black text-amber-400">정답: {lastQuiz.options[lastQuiz.answer]}</p>
+              </div>
+            </div>
+          )}
+
           {myPlayer?.role === Role.COMBAT && gameState.phase === 'BATTLE' && team && !team.isDead && (
             <>
               <div className="absolute bottom-12 left-12 scale-[1.5] z-30 opacity-80"><Joystick onMove={(dir) => network.sendAction({ type: 'MOVE', payload: { teamId: myPlayer.teamId, dir } })} /></div>
