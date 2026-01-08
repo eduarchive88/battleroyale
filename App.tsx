@@ -114,6 +114,7 @@ const App: React.FC = () => {
 
     const damageBase = (t.stats.atk * (t.activeEffects.some(e => e.type === 'w_double') ? 2 : 1));
 
+    // 확정 데미지 타겟이 지정된 경우 (도적 습격 등)
     if (forceDamageTargetId) {
       const target = newState.teams[forceDamageTargetId];
       if (target && !target.isDead && !target.activeEffects.some(e => e.type === 'w_invinc')) {
@@ -219,6 +220,7 @@ const App: React.FC = () => {
           const skill = SKILLS_INFO[t.classType].find(s => s.id === payload.skId);
           if (!t || !skill || t.isDead || t.mp < skill.mp || newState.phase === 'QUIZ') return newState;
           if (now < (t.skillCooldowns[payload.skId] || 0)) return newState;
+          
           t.mp -= skill.mp;
           t.skillCooldowns[payload.skId] = now + 5000;
           playSound('skill');
@@ -236,7 +238,7 @@ const App: React.FC = () => {
               t.x = closestTarget.x - Math.cos(rad) * 60;
               t.y = closestTarget.y - Math.sin(rad) * 60;
               t.angle = closestTarget.angle;
-              // 습격 성공 시 즉시 확정 데미지 입힘
+              // 습격 성공 시 즉시 확정 데미지 입힘 (동기적 처리로 포인트 리셋 방지)
               executeAttack(newState, t.id, closestTarget.id);
             }
           } else if (skill.id === 'm_ice') {
@@ -665,7 +667,7 @@ const App: React.FC = () => {
                     <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest mb-4 border-b border-amber-900/40 pb-1">물약 및 축복</p>
                     <div className="grid grid-cols-2 gap-2">
                       <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'hp', cost:3}})} className="p-3 bg-red-950/30 border-2 border-red-900 text-[12px] font-black">체력 회복 (3P)</button>
-                      <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'mp', cost:3}})} className="p-3 bg-blue-950/30 border-2 border-blue-900 text-[12px] font-black">마력 회복 (3P)</button>
+                      <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'MP', stat:'mp', cost:3}})} className="p-3 bg-blue-950/30 border-2 border-blue-900 text-[12px] font-black">마력 회복 (3P)</button>
                       <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'atk', cost:5}})} className="p-3 bg-amber-950/20 border-2 border-amber-900 text-[12px] font-black">공격력 강화 (5P)</button>
                       <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'def', cost:5}})} className="p-3 bg-amber-950/20 border-2 border-amber-900 text-[12px] font-black">방어력 강화 (5P)</button>
                     </div>
