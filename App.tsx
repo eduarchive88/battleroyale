@@ -122,7 +122,6 @@ const App: React.FC = () => {
         target.hp = Math.max(0, target.hp - damage);
         t.totalDamageDealt = (t.totalDamageDealt || 0) + damage;
         if (target.hp <= 0) target.isDead = true;
-        t.points += 2;
       }
       return;
     }
@@ -145,7 +144,6 @@ const App: React.FC = () => {
         target.hp = Math.max(0, target.hp - damage);
         t.totalDamageDealt = (t.totalDamageDealt || 0) + damage;
         if (target.hp <= 0) target.isDead = true;
-        t.points += 2;
       }
     });
   }
@@ -238,7 +236,7 @@ const App: React.FC = () => {
               t.x = closestTarget.x - Math.cos(rad) * 60;
               t.y = closestTarget.y - Math.sin(rad) * 60;
               t.angle = closestTarget.angle;
-              // 습격 성공 시 즉시 확정 데미지 입힘 (동기적 처리로 포인트 리셋 방지)
+              // 습격 성공 시 즉시 확정 데미지 입힘 (포인트 획득 없음)
               executeAttack(newState, t.id, closestTarget.id);
             }
           } else if (skill.id === 'm_ice') {
@@ -291,7 +289,8 @@ const App: React.FC = () => {
                 if (target.id === t.id || target.isDead) return;
                 const dist = Math.sqrt((target.x - t.x)**2 + (target.y - t.y)**2);
                 if (dist < 400) { 
-                  const damage = Math.floor(t.stats.atk * 3.5);
+                  // 데미지 배율 3.5 -> 1.75로 하향
+                  const damage = Math.floor(t.stats.atk * 1.75);
                   target.hp = Math.max(0, target.hp - damage); 
                   t.totalDamageDealt = (t.totalDamageDealt || 0) + damage;
                   if(target.hp===0) target.isDead=true; 
@@ -667,7 +666,7 @@ const App: React.FC = () => {
                     <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest mb-4 border-b border-amber-900/40 pb-1">물약 및 축복</p>
                     <div className="grid grid-cols-2 gap-2">
                       <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'hp', cost:3}})} className="p-3 bg-red-950/30 border-2 border-red-900 text-[12px] font-black">체력 회복 (3P)</button>
-                      <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'MP', stat:'mp', cost:3}})} className="p-3 bg-blue-950/30 border-2 border-blue-900 text-[12px] font-black">마력 회복 (3P)</button>
+                      <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'mp', cost:3}})} className="p-3 bg-blue-950/30 border-2 border-blue-900 text-[12px] font-black">마력 회복 (3P)</button>
                       <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'atk', cost:5}})} className="p-3 bg-amber-950/20 border-2 border-amber-900 text-[12px] font-black">공격력 강화 (5P)</button>
                       <button onClick={() => network.sendAction({type:'SUPPORT_ACTION', payload:{teamId:team.id, action:'STAT', stat:'def', cost:5}})} className="p-3 bg-amber-950/20 border-2 border-amber-900 text-[12px] font-black">방어력 강화 (5P)</button>
                     </div>
